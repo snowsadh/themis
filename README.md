@@ -1,73 +1,26 @@
-# ⚖️ Themis.AI : Moot Court Simulator
+<h1 align="center">Themis</h1>
 
-Welcome to **Themis.AI**, a real-time AI-powered moot court simulator designed to help law students, professionals, and enthusiasts practice their legal argumentation skills. Engage in high-stakes simulated trials, present your case as a Petitioner or Respondent, and receive instant, dynamic feedback and scoring from an AI Judge.
+Welcome to Themis, the online moot court simulator. Practice your legal argumentation skills in high-stakes simulated trials. Here you can : Select from a carousel of 50+ Real Indian Cases on Fundamental rights, Present as a Petitioner or Respondent, Experience real-time judgement, rebuttals, and thrill with the dynamic HUD.
 
-## Features
-- **Real-time AI Judge**: Powered by OpenRouter, the AI Judge evaluates your arguments instantly via WebSockets, providing logic, clarity, and confidence scores.
-- **Dynamic Courtroom UI**: An immersive dashboard complete with Counsel panels, live transcript feeds, pulsating timers, and a fully interactive AI judge speech bubble.
-- **Live Scoring & Analytics**: Track your performance across multiple turns. The system dynamically updates your core argumentative metrics and evaluates your legal logic in real-time.
-- **Custom Case Selection**: Choose from landmark cases in Indian jurisprudence (e.g., Dr. Priya Mehta v. AIIMS, R.K. Builders v. State of Maharashtra) to ground your arguments in real-world legal contexts.
-- **Responsive Dashboard Layout**: Built with modern CSS grid/flexbox to adapt smoothly to your screen without breaking immersiveness.
-- **Voice input & spoken judge**: Counsel can dictate arguments with the browser microphone (speech-to-text); the AI Judge's replies are read aloud (text-to-speech) via the Web Speech API.
 
-## Tech Stack
-- **Frontend**: React.js, Vite, Zustand (State Management), Vanilla CSS for custom animations and layout.
-- **Speech (browser)**: [Web Speech API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API) — **STT** via `SpeechRecognition` / `webkitSpeechRecognition` (counsel microphone input into the argument field); **TTS** via `speechSynthesis` and `SpeechSynthesisUtterance` (spoken AI Judge feedback). No extra server-side voice stack; recognition quality and availability depend on the browser (Chrome and Edge offer the broadest support).
-- **Backend**: Python, FastAPI, WebSockets, Uvicorn.
-- **LLM**: OpenRouter-compatible chat completions.
+### What is Themis?
 
----
 
-## How to use
+### Is this for me?
+  If you are a law student, professional, or a curious person in general, then yesss!
 
-### Prerequisites
-You will need the following installed on your machine:
-- Node.js (v16+)
-- Python (3.8+)
-- An OpenRouter API Key.
-- For **speech-to-text** (mic input), use a browser that implements the Web Speech recognition API (e.g. Chrome or Edge) and allow microphone access when prompted.
+### Initial Setup
 
-### 1. Clone the Repository
-```bash
-git clone https://github.com/yashmit0472/Themis.AI.git
-cd Themis.AI
-```
+  
+### How to use?
 
-### 2. Set up the Backend
-Navigate to the root directory and install the required Python dependencies:
-```bash
-# Recommended: Create a virtual environment
-python -m venv .venv
-source .venv/bin/activate  # On Windows, use `.venv\Scripts\activate`
 
-# Install dependencies
-pip install fastapi uvicorn websockets python-dotenv
-```
+### Instructions
 
-Create a `.env` file in the `backend/` directory (or root) and add your OpenRouter API Key:
-```env
-OPENROUTER_API_KEY=your_openrouter_api_key_here
-# Optional: choose a different OpenRouter model
-OPENROUTER_MODEL=openai/gpt-4o-mini
-```
+  
+#### Graphics Inspired By
+  Ace Attorney
 
-Start the FastAPI server:
-```bash
-uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### 3. Set up the Frontend
-Open a new terminal, navigate to the project directory, and start the Vite development server:
-```bash
-# Install frontend dependencies (if not already done)
-npm install
-
-# Run the app
-npm run dev
-```
-
-### 4. Enter the Courtroom
-Open your browser and navigate to `http://localhost:5173`. Select your case, pick your side, and approach the Bench!
-
----
-*Built with passion for legal tech.*
+#### Credits
+      
+  

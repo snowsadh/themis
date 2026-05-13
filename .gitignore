@@ -13,7 +13,7 @@ dist
 dist-ssr
 
 # Cache
-*/__pycache__/
+**/__pycache__/
 *.pyc
 
 # Config
@@ -28,10 +28,9 @@ dist-ssr
 *.sw?
 
 # Secret
-*/.env
+.env
+**/.env
 *.local
 
 # Virtual Environment
-venv/
-.venv/
-env/
+*venv*/

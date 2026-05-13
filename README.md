@@ -1,9 +1,4 @@
 <h1 align="center">Themis</h1>
-<p align="center">An online moot court simulator. Argue real Indian cases. Get judged in real time.</p>
-
----
-
-## What is Themis?
 
 Themis is a browser-based moot court simulator where two players argue opposite sides of real Indian Court cases based on constitutional and fundamental rights issues. Players present arguments, rebut opposing claims, and respond to judicial questioning. Every action you take can and will affect your scoreboard matrix in realtime based on : Legal Accuracy, Case Relevance, Logical Reasoning, and Rebuttal Quality.
 

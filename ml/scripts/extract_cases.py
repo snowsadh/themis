@@ -1,17 +1,17 @@
-import google.generativeai as genai
+from openai import OpenAI
 import json
 import time
 import os
 from dotenv import load_dotenv
+import re
 
 load_dotenv()
-API_KEY = os.getenv("GEMINI_API_KEY")
 INPUT_FILE = "../data/scraped.json"
 OUTPUT_FILE = "../data/cases.json"
-
-genai.configure(api_key=API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
-
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPENROUTER_API_KEY"),
+)
 PROMPT_TEMPLATE = """You are a senior legal expert and moot court coach. Analyze this Indian court judgment and return a JSON object with exactly these fields:
 
 {{
@@ -28,18 +28,75 @@ Return ONLY the JSON object. No preamble, no explanation, no markdown backticks.
 JUDGMENT TEXT:
 {text}"""
 
+def clean_judgment_text(text: str) -> str:
+    if not text:
+        return ""
+
+    # Normalize line endings
+    text = text.replace("\r", "\n")
+
+    # Remove excessive escaped newlines/tabs from scraping
+    text = text.replace("\\n", "\n")
+    text = text.replace("\\t", " ")
+
+    # Remove repeated spaces
+    text = re.sub(r"[ \t]+", " ", text)
+
+    # Remove excessive blank lines
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    # Remove citation clutter at top
+    text = re.sub(
+        r"Equivalent citations:.*?(?=\nAuthor:|\nBench:|\nPETITIONER:)",
+        "",
+        text,
+        flags=re.DOTALL | re.IGNORECASE
+    )
+
+    # Remove kanoon cite metadata
+    text = re.sub(
+        r"\[Cites.*?Cited by.*?\]",
+        "",
+        text,
+        flags=re.DOTALL | re.IGNORECASE
+    )
+
+    # Remove excessive weird spacing between letters
+    text = re.sub(r"([a-zA-Z])\s{2,}([a-zA-Z])", r"\1 \2", text)
+
+    # Collapse broken OCR spacing
+    text = re.sub(r"\s+\n", "\n", text)
+    text = re.sub(r"\n\s+", "\n", text)
+
+    # Trim
+    text = text.strip()
+
+    return text
 
 def extract_case(raw_case):
     text = raw_case.get("full_text", "")
 
+    # Clean the judgment text
+    text = clean_judgment_text(text)
+
     # Trim to avoid token overflow. First 12000 chars is usually enough
-    text = text[:12000]
+    text = text[:25000]
 
     prompt = PROMPT_TEMPLATE.format(text=text)
 
     try:
-        response = model.generate_content(prompt)
-        raw = response.text.strip()
+        response = client.chat.completions.create(
+            model="google/gemini-2.0-flash-001",
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.2
+        )
+
+        raw = response.choices[0].message.content.strip()
 
         # Strip markdown fences if Gemini adds them anyway
         if raw.startswith("```"):
@@ -99,8 +156,8 @@ def main():
         with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
             json.dump(extracted_cases, f, ensure_ascii=False, indent=2)
 
-        # Rate limit safety
-        time.sleep(3)
+        # Avoid API rate limit
+        time.sleep(40)
 
     print(f"\nDone. {len(extracted_cases)} cases saved to {OUTPUT_FILE}")
 

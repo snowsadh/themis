@@ -2,19 +2,22 @@ import json
 import time
 import os
 import random
-import requests
+from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
-API_KEY = os.getenv("OPENROUTER_API_KEY")
 INPUT_FILE = "../data/cases.json"
 OUTPUT_FILE = "../data/dataset.json"
-MODEL = "google/gemini-2.0-flash-001"
+MODEL = "deepseek-v4-flash"
+
+client = OpenAI(
+    api_key=os.getenv("DEEPSEEK_API_KEY"),
+    base_url="https://api.deepseek.com"
+)
 
 # ============================================================
 # 9 BEHAVIORAL PROFILES
-# One per turn. Each produces a distinct score pattern.
-# Scorer never sees these labels — only the argument.
+# Scorer never sees these labels — only the raw argument.
 # ============================================================
 
 PROFILES = [
@@ -41,7 +44,7 @@ The argument sounds confident, structured, and well-prepared."""
 - Is very well-structured and fluent — clear logical flow, good moot court language
 - But is arguing a legal point that is tangential to the core issue framed in this case
 - The argument would be valid in a different context but simply doesn't address what this case is about
-- Sounds confident but is off-target"""
+- Sounds confident but is completely off-target"""
     },
     {
         "id": "vague_but_correct",
@@ -64,57 +67,60 @@ The argument sounds confident, structured, and well-prepared."""
         "instruction": """Generate an argument where the counsel:
 - Makes a point that inadvertently undermines their own side's position
 - OR concedes something they absolutely should not concede
-- OR argues something that is inconsistent with their side's stated stand
+- OR argues something inconsistent with their side's stated stand
 - Uses confident formal language so it's not immediately obvious — sounds plausible until you think about it"""
     },
     {
         "id": "citation_drop_no_ratio",
         "instruction": """Generate an argument where the counsel:
-- Name-drops multiple famous cases (DK Basu, Maneka Gandhi, Olga Tellis, etc.) confidently
+- Name-drops multiple famous cases (DK Basu, Maneka Gandhi, Olga Tellis, Vishaka, etc.) confidently
 - But never explains what those cases actually held — just cites them as if the name alone proves the point
 - Does not explain HOW the ratio of any case applies to the current facts
 - Sounds authoritative but is legally hollow"""
     },
     {
         "id": "sharp_hypothetical_handler",
-        "instruction": """Generate an argument where the counsel:
-- Is responding to a tough hypothetical or question from the bench
-- Handles it cleanly — acknowledges the hypothetical, explains why their position still holds, draws a clear distinction
-- Shows genuine legal reasoning under pressure
-- This argument IS a response to a judge question — write it as such, starting with "My Lords, in response to the question posed by the Hon'ble bench..."
-- The substance should be solid even if the overall case position is complex"""
+        "instruction": """Generate an argument where the counsel is responding to a tough hypothetical or question from the bench:
+- Start with: "My Lords, in response to the question posed by the Hon'ble bench..."
+- Acknowledges the hypothetical directly without dodging it
+- Explains clearly why their position still holds despite the hypothetical
+- Draws a precise legal distinction to answer the challenge
+- Shows genuine legal reasoning under pressure — solid and composed"""
     },
     {
         "id": "procedurally_correct_legally_empty",
         "instruction": """Generate an argument where the counsel:
 - Uses perfect moot court etiquette and formal language throughout
 - Has excellent structure — clear issue identification, logical flow, proper transitions
-- But the actual legal content is empty — no real argument, just restating facts in legal-sounding language
-- Sounds very polished and professional but says nothing of legal substance
-- Like someone who memorized the format but not the law"""
+- But the actual legal content is empty — just restating facts in legal-sounding language
+- No legal principle, no citation, no application — just dressed-up facts
+- Sounds very polished and professional but says nothing of legal substance"""
     }
 ]
 
+NON_HYPOTHETICAL_PROFILES = [p for p in PROFILES if p["id"] != "sharp_hypothetical_handler"]
+HYPOTHETICAL_PROFILE = next(p for p in PROFILES if p["id"] == "sharp_hypothetical_handler")
+
+# ============================================================
+# API CALL
 # ============================================================
 
-def call_llm(prompt, temperature=0.8):
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json"
-    }
-    body = {
-        "model": MODEL,
-        "temperature": temperature,
-        "messages": [{"role": "user", "content": prompt}]
-    }
-    response = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers=headers,
-        json=body,
-        timeout=60
-    )
-    response.raise_for_status()
-    return response.json()["choices"][0]["message"]["content"].strip()
+def call_llm(system_prompt, user_prompt, temperature=0.8):
+    for attempt in range(3):
+        try:
+            response = client.chat.completions.create(
+                model=MODEL,
+                temperature=temperature,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"  [ERROR attempt {attempt+1}] {e}")
+            time.sleep(6 * (attempt + 1))
+    raise Exception("All 3 attempts failed")
 
 
 def parse_json(raw):
@@ -128,12 +134,12 @@ def parse_json(raw):
 
 
 # ============================================================
-# ARGUMENT GENERATION — one call per profile
+# PROMPTS
 # ============================================================
 
-ARG_PROMPT = """You are a moot court coach generating a single oral argument for a Supreme Court moot court simulation.
+ARG_SYSTEM = "You are a moot court coach generating realistic oral arguments for a Supreme Court moot court simulation. Follow instructions precisely."
 
-CASE:
+ARG_USER = """CASE:
 Title: {case_title}
 Summary: {case_summary}
 Legal Issue: {legal_issue}
@@ -142,6 +148,9 @@ Respondent's Stand: {respondent_stand}
 Relevant Laws: {relevant_laws}
 
 SIDE: {side}
+
+CONTEXT FROM PREVIOUS TURN:
+{previous_context}
 
 BEHAVIORAL INSTRUCTION (follow this precisely — this defines HOW the counsel argues):
 {instruction}
@@ -157,13 +166,9 @@ Length: 4-7 sentences. ONE legal point only.
 Return ONLY the argument text as a plain string. No JSON, no preamble, no backticks."""
 
 
-# ============================================================
-# SCORING — scorer never sees profile labels
-# ============================================================
+SCORE_SYSTEM = "You are a sharp, experienced Supreme Court judge presiding over a moot court competition. You have been silently taking notes. Evaluate arguments strictly and independently per criterion."
 
-SCORING_PROMPT = """You are a sharp, experienced Supreme Court judge presiding over a moot court competition. You have been silently taking notes. The counsel has just finished their submission and yielded the floor.
-
-CASE CONTEXT:
+SCORE_USER = """CASE CONTEXT:
 Title: {case_title}
 Legal Issue: {legal_issue}
 Petitioner's Stand: {petitioner_stand}
@@ -172,49 +177,68 @@ Relevant Laws: {relevant_laws}
 
 CURRENT SUBMISSION:
 Side: {side}
-{opposing_context}
+{context_block}
 Argument just made:
 \"{current_argument}\"
 
 {bench_handling_note}
 
-SCORING RULES:
-Evaluate each criterion COMPLETELY INDEPENDENTLY. A single argument can score high on one criterion and low on another — this is expected and correct.
+SCORING RULES — read carefully:
+Evaluate each criterion COMPLETELY INDEPENDENTLY. One argument can score +3 on one and -3 on another — this is expected and correct.
 
-- legal_application (-3 to +3): Did they correctly identify AND apply the specific law/precedent to these exact facts? +3 = precise and correct. -3 = wrong law or completely misapplied.
-- issue_relevance (-3 to +3): Did this argument address the actual legal issue being argued in this case? +3 = directly on point. -3 = argued something entirely tangential.
-- argument_flow (-3 to +3): Was the argument logically structured, coherent, and well-sequenced? Score this REGARDLESS of legal accuracy — a wrong argument can still be well-structured.
-- bench_handling (-3 to +3 or null): ONLY if this is a response to a judge's question — how well did they handle the pressure? null if unprompted submission.
+- legal_application (-3 to +3):
+  +3 = correctly identified AND precisely applied specific law/precedent to these exact facts
+  0 = vague or partially correct
+  -3 = wrong law, completely misapplied, or cited without any application
+  MUST be negative if law is misapplied or absent.
 
-DO NOT move all four scores in the same direction. Each criterion is independent.
+- issue_relevance (-3 to +3):
+  +3 = directly addresses the core legal issue of this case
+  0 = loosely related
+  -3 = argued something entirely tangential to the actual issue
+  MUST be negative if argument misses the issue entirely.
 
-JUDGE RESPONSE — after counsel yields floor, pick ONE:
-A) Ask one sharp question about a specific gap, inconsistency, or interesting point
-B) Challenge with a precise hypothetical ("If X, does your argument still hold?")
-C) Transfer to opposing counsel if nothing meaningful to probe
+- argument_flow (-3 to +3):
+  +3 = perfectly structured, logical sequence, coherent
+  0 = somewhat structured
+  -3 = incoherent, jumps around, no logical sequence
+  Score this REGARDLESS of legal accuracy.
 
-Rules:
-- One line only. Judges do not lecture.
-- Use: "Counsel, what is your submission on...", "Can you take the bench to...", "The bench will now hear..."
+- bench_handling (-3 to +3 or null):
+  Score ONLY if counsel was responding to a judge question.
+  +3 = directly addressed question, sharp reasoning under pressure
+  -3 = dodged question, gave generic answer, fell apart
+  null if unprompted submission.
+
+STRICT: Weak, off-topic, or legally hollow arguments MUST receive negative scores. Never give benefit of the doubt.
+
+JUDGE RESPONSE — pick ONE after counsel yields:
+A) Ask one sharp focused question about a gap, inconsistency, or specific point
+B) Challenge with a precise hypothetical — "If X, does your argument still hold?"
+C) Transfer to opposing counsel with a brief remark
+
+IMPORTANT: speaker_switch must be true roughly 40% of the time. If last 2+ turns had speaker_switch=false, strongly prefer true now.
+
+Style: One line only. "Counsel, what is your submission on...", "Can you take the bench to...", "The bench will now hear..."
 
 speaker_switch:
-- false → you asked a question (same counsel answers next)
+- false → asked a question, same counsel answers next
 - true → transferring to other side
 
-judge_notes: One raw honest private observation. What you actually think. Not formal.
+judge_notes: One raw honest private observation. Not formal.
 
 GOOD judge_response examples:
-- "Counsel, you rely on Article 21 but have not addressed the procedure established by law — what is your submission on that?"
-- "The bench notes your reliance on Maneka Gandhi — that case dealt with passport seizure, how does its ratio apply here?"
-- "If the State had given 24 hours notice before detention, would your argument on arbitrariness still hold?"
+- "Counsel, you rely on Article 21 but have not addressed procedure established by law — what is your submission?"
+- "The bench notes your reliance on Maneka Gandhi — that dealt with passport seizure, how does its ratio apply here?"
+- "If the State had given 24 hours notice before detention, would your arbitrariness argument still hold?"
 - "The bench will now hear the respondent."
 
 GOOD judge_notes examples:
 - "Petitioner keeps citing DK Basu but hasn't touched sovereign immunity at all"
-- "Strong — knows the Maneka Gandhi ratio cold, watch how they handle cross on procedure"
+- "Strong — knows the Maneka Gandhi ratio cold, watch cross on procedure"
 - "Structurally clean but said absolutely nothing of legal substance"
-- "Dodged the Article 22(2) question entirely, flagging for later"
-- "Cited three cases, explained none of them — classic citation bluff"
+- "Cited three cases, explained none — classic citation bluff"
+- "Completely off-topic — argued criminal liability in a constitutional matter"
 
 Return ONLY a JSON object, no preamble, no backticks:
 {{
@@ -228,38 +252,6 @@ Return ONLY a JSON object, no preamble, no backticks:
   "speaker_switch": <true or false>,
   "judge_notes": "..."
 }}"""
-
-
-def build_scoring_prompt(case, history, current_argument, side):
-    opposing_last = None
-    for turn in reversed(history):
-        if turn["side"] != side:
-            opposing_last = turn["argument"]
-            break
-
-    opposing_context = (
-        f"What opposing counsel last argued:\n\"{opposing_last}\"\n"
-        if opposing_last else ""
-    )
-
-    prev_was_question = bool(history) and not history[-1].get("speaker_switch", True)
-    bench_handling_note = (
-        "Note: This counsel is RESPONDING to the judge's previous question. Score bench_handling based on how well they handled it."
-        if prev_was_question else
-        "Note: This is an unprompted submission, NOT a response to a judge question. Set bench_handling to null."
-    )
-
-    return SCORING_PROMPT.format(
-        case_title=case["case_title"],
-        legal_issue=case["legal_issue"],
-        petitioner_stand=case["petitioner_stand"],
-        respondent_stand=case["respondent_stand"],
-        relevant_laws=", ".join(case["relevant_laws"]),
-        side=side.upper(),
-        opposing_context=opposing_context,
-        current_argument=current_argument,
-        bench_handling_note=bench_handling_note
-    )
 
 
 # ============================================================
@@ -280,12 +272,10 @@ def main():
         dataset = []
         done_ids = set()
 
-    # Alternate sides — petitioner odd turns, respondent even
-    sides = ["petitioner", "respondent"] * 5  # 10 elements, take 9
-
     for i, case in enumerate(cases):
         doc_id = case.get("doc_id")
         title = case.get("case_title", "Unknown")[:60]
+        relevant_laws_str = ", ".join(case["relevant_laws"])
 
         if doc_id in done_ids:
             print(f"[{i+1}/{len(cases)}] Skipping: {title}")
@@ -293,103 +283,139 @@ def main():
 
         print(f"\n[{i+1}/{len(cases)}] {title}")
 
-        # Shuffle profiles — guaranteed all 9 used exactly once
-        shuffled_profiles = PROFILES.copy()
-        random.shuffle(shuffled_profiles)
+        # Profile pool setup
+        non_hyp_pool = NON_HYPOTHETICAL_PROFILES.copy()
+        random.shuffle(non_hyp_pool)
+        hyp_used = False
 
-        # Assign sides — shuffle side order too for variety but keep alternating base
-        side_order = sides[:9]
-        random.shuffle(side_order)
+        history = []
+        case_turns = []
+        current_side = "petitioner"
+        petitioner_first_done = False
+        respondent_first_done = False
+        turn = 0
 
-        # Generate all 9 arguments first
-        arguments = []
-        failed = False
-        for j, profile in enumerate(shuffled_profiles):
-            side = side_order[j]
-            print(f"  Generating turn {j+1}/9 — profile: {profile['id']} ({side})")
+        while turn < 9:
+            prev_was_question = bool(history) and not history[-1].get("speaker_switch", True)
 
-            prompt = ARG_PROMPT.format(
+            # Profile selection
+            if prev_was_question and not hyp_used:
+                profile = HYPOTHETICAL_PROFILE
+                hyp_used = True
+            elif not non_hyp_pool and not hyp_used:
+                # Pool exhausted, hyp never triggered — use it now
+                profile = HYPOTHETICAL_PROFILE
+                hyp_used = True
+            elif not non_hyp_pool:
+                # Both exhausted — refill non-hyp
+                non_hyp_pool = NON_HYPOTHETICAL_PROFILES.copy()
+                random.shuffle(non_hyp_pool)
+                profile = non_hyp_pool.pop(0)
+            else:
+                profile = non_hyp_pool.pop(0)
+
+            print(f"  Turn {turn+1}/9 — {current_side} | {profile['id']}")
+
+            # Build generation context
+            if prev_was_question:
+                previous_context = f"The judge just asked: \"{history[-1]['judge_response']}\"\nYou are responding to this question directly."
+            elif history:
+                last_opposing = next((h["argument"] for h in reversed(history) if h["side"] != current_side), None)
+                previous_context = f"Opposing counsel last argued: \"{last_opposing}\"" if last_opposing else "This is your opening submission."
+            else:
+                previous_context = "This is the opening submission of the case."
+
+            # GENERATE
+            arg_user = ARG_USER.format(
                 case_title=case["case_title"],
                 case_summary=case["case_summary"],
                 legal_issue=case["legal_issue"],
                 petitioner_stand=case["petitioner_stand"],
                 respondent_stand=case["respondent_stand"],
-                relevant_laws=", ".join(case["relevant_laws"]),
-                side=side.upper(),
+                relevant_laws=relevant_laws_str,
+                side=current_side.upper(),
+                previous_context=previous_context,
                 instruction=profile["instruction"]
             )
 
             try:
-                argument_text = call_llm(prompt, temperature=0.85)
-                arguments.append({
-                    "side": side,
-                    "argument": argument_text,
-                    "profile_id": profile["id"]
-                })
+                argument_text = call_llm(ARG_SYSTEM, arg_user, temperature=0.85)
             except Exception as e:
-                print(f"  [GEN FAILED] {e}")
-                failed = True
+                print(f"  [GEN FAILED] {e} — skipping case")
+                case_turns = []
                 break
 
             time.sleep(3)
 
-        if failed or len(arguments) < 9:
-            print(f"  Skipping — only got {len(arguments)} arguments")
-            continue
-
-        # Score each turn with growing history
-        history = []
-        case_turns = []
-        petitioner_first_done = False
-        respondent_first_done = False
-
-        for j, arg in enumerate(arguments):
-            side = arg["side"]
-            argument_text = arg["argument"]
-            profile_id = arg["profile_id"]
-
+            # Build scoring context
             is_first_of_side = (
-                (side == "petitioner" and not petitioner_first_done) or
-                (side == "respondent" and not respondent_first_done)
+                (current_side == "petitioner" and not petitioner_first_done) or
+                (current_side == "respondent" and not respondent_first_done)
             )
 
-            print(f"  Scoring turn {j+1}/9 ({side}, {profile_id})")
+            if is_first_of_side:
+                context_block = ""
+                bench_handling_note = "Note: This is the first submission of this side. Set bench_handling to null."
+            elif prev_was_question:
+                context_block = f"Judge's question counsel is responding to:\n\"{history[-1]['judge_response']}\"\n"
+                bench_handling_note = "Note: This counsel is RESPONDING to the judge's question. Score bench_handling."
+            else:
+                last_opposing = next((h["argument"] for h in reversed(history) if h["side"] != current_side), None)
+                context_block = f"Opposing counsel last argued:\n\"{last_opposing}\"\n" if last_opposing else ""
+                bench_handling_note = "Note: This is an unprompted submission. Set bench_handling to null."
 
-            scoring_prompt = build_scoring_prompt(case, history, argument_text, side)
+            score_user = SCORE_USER.format(
+                case_title=case["case_title"],
+                legal_issue=case["legal_issue"],
+                petitioner_stand=case["petitioner_stand"],
+                respondent_stand=case["respondent_stand"],
+                relevant_laws=relevant_laws_str,
+                side=current_side.upper(),
+                context_block=context_block,
+                current_argument=argument_text,
+                bench_handling_note=bench_handling_note
+            )
 
+            # SCORE
             try:
-                raw_score = call_llm(scoring_prompt, temperature=0.7)
+                raw_score = call_llm(SCORE_SYSTEM, score_user, temperature=0.7)
                 scored = parse_json(raw_score)
             except Exception as e:
-                print(f"  [SCORE FAILED] {e}")
+                print(f"  [SCORE FAILED] {e} — skipping turn")
+                # Put profile back so it's not wasted
+                if profile["id"] != "sharp_hypothetical_handler":
+                    non_hyp_pool.insert(0, profile)
+                else:
+                    hyp_used = False
                 time.sleep(10)
+                turn += 1
                 continue
 
             # Force null bench_handling on first turn of each side
             if is_first_of_side:
                 scored["delta_scores"]["bench_handling"] = None
-                if side == "petitioner":
+                if current_side == "petitioner":
                     petitioner_first_done = True
                 else:
                     respondent_first_done = True
 
-            # Get opposing last argument for training input
-            opposing_last = None
-            for turn in reversed(history):
-                if turn["side"] != side:
-                    opposing_last = turn["argument"]
-                    break
+            # Build training input
+            if prev_was_question and not is_first_of_side:
+                input_context = {"judge_last_response": history[-1]["judge_response"]}
+            else:
+                last_opposing = next((h["argument"] for h in reversed(history) if h["side"] != current_side), None)
+                input_context = {"opposing_last_argument": last_opposing}
 
             training_example = {
                 "doc_id": doc_id,
-                "turn": j + 1,
-                "profile_id": profile_id,  # for analysis — strip before training if needed
+                "turn": turn + 1,
+                "profile_id": profile["id"],
                 "input": {
                     "case_summary": case["case_summary"],
                     "legal_issue": case["legal_issue"],
-                    "relevant_laws": case["relevant_laws"],
-                    "side": side,
-                    "opposing_last_argument": opposing_last,
+                    "relevant_laws": relevant_laws_str,
+                    "side": current_side,
+                    **input_context,
                     "current_argument": argument_text
                 },
                 "output": {
@@ -403,21 +429,29 @@ def main():
             case_turns.append(training_example)
 
             history.append({
-                "side": side,
+                "side": current_side,
                 "argument": argument_text,
-                "speaker_switch": scored.get("speaker_switch", True),
-                "judge_notes": scored.get("judge_notes", "")
+                "judge_response": scored["judge_response"],
+                "speaker_switch": scored["speaker_switch"],
+                "judge_notes": scored["judge_notes"]
             })
 
+            # Next side from speaker_switch
+            if scored["speaker_switch"]:
+                current_side = "respondent" if current_side == "petitioner" else "petitioner"
+
+            turn += 1
             time.sleep(4)
 
-        dataset.extend(case_turns)
-        done_ids.add(doc_id)
+        if case_turns:
+            dataset.extend(case_turns)
+            done_ids.add(doc_id)
+            with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+                json.dump(dataset, f, ensure_ascii=False, indent=2)
+            print(f"  [OK] {len(case_turns)} turns saved. Total: {len(dataset)}")
+        else:
+            print(f"  [SKIPPED] No turns saved for this case.")
 
-        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-            json.dump(dataset, f, ensure_ascii=False, indent=2)
-
-        print(f"  [OK] {len(case_turns)} turns saved. Total dataset: {len(dataset)}")
         time.sleep(8)
 
     print(f"\nDone. {len(dataset)} total training examples in {OUTPUT_FILE}")

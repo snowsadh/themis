@@ -266,18 +266,18 @@ def main():
     if os.path.exists(OUTPUT_FILE):
         with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
             dataset = json.load(f)
-        done_ids = {entry["doc_id"] for entry in dataset}
+        done_ids = {entry["case_id"] for entry in dataset}
         print(f"Resuming — {len(done_ids)} cases already done")
     else:
         dataset = []
         done_ids = set()
 
     for i, case in enumerate(cases):
-        doc_id = case.get("doc_id")
+        case_id = case.get("case_id")
         title = case.get("case_title", "Unknown")[:60]
         relevant_laws_str = ", ".join(case["relevant_laws"])
 
-        if doc_id in done_ids:
+        if case_id in done_ids:
             print(f"[{i+1}/{len(cases)}] Skipping: {title}")
             continue
 
@@ -407,9 +407,9 @@ def main():
                 input_context = {"opposing_last_argument": last_opposing}
 
             training_example = {
-                "doc_id": doc_id,
+                "case_id": case_id,
                 "turn": turn + 1,
-                "profile_id": profile["id"],
+                "argument_type": profile["id"],
                 "input": {
                     "case_summary": case["case_summary"],
                     "legal_issue": case["legal_issue"],
@@ -445,7 +445,7 @@ def main():
 
         if case_turns:
             dataset.extend(case_turns)
-            done_ids.add(doc_id)
+            done_ids.add(case_id)
             with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
                 json.dump(dataset, f, ensure_ascii=False, indent=2)
             print(f"  [OK] {len(case_turns)} turns saved. Total: {len(dataset)}")

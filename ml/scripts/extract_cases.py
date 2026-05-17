@@ -106,7 +106,7 @@ def extract_case(raw_case):
         raw = raw.strip()
 
         extracted = json.loads(raw)
-        extracted["doc_id"] = raw_case.get("doc_id")
+        extracted["case_id"] = raw_case.get("case_id")
         extracted["url"] = raw_case.get("url")
         return extracted
 
@@ -129,17 +129,17 @@ def main():
     if os.path.exists(OUTPUT_FILE):
         with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
             extracted_cases = json.load(f)
-        done_ids = {c["doc_id"] for c in extracted_cases}
+        done_ids = {c["case_id"] for c in extracted_cases}
         print(f"Resuming — {len(extracted_cases)} already extracted.")
     else:
         extracted_cases = []
         done_ids = set()
 
     for i, case in enumerate(cases):
-        doc_id = case.get("doc_id")
+        case_id = case.get("case_id")
         title = case.get("title", "Unknown")[:60]
 
-        if doc_id in done_ids:
+        if case_id in done_ids:
             print(f"[{i+1}/{len(cases)}] Skipping: {title}")
             continue
 

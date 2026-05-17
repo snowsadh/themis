@@ -100,7 +100,7 @@ def scrape_case(url):
         doc_number = url.rstrip("/").split("/")[-1]
 
         return {
-            "doc_id": doc_number,
+            "case_id": doc_number,
             "url": url,
             "title": title,
             "full_text": full_text

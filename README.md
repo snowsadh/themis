@@ -25,7 +25,7 @@ If you're a law student, a professional, or just someone who is curious to exper
 
 - **Frontend** - React + Vite
 - **Backend** - FastAPI + WebSocket
-- **AI Judge** - Fine-tuned Llama 3.2 (Unsloth + SFT)
+- **AI Judge** - Supervised Fine-tuned Llama 3.2 (Unsloth + QLoRA)
 - **Case Data** - Indian Kanoon (50+ constitutional and fundamental rights cases)
 
 ## Graphics Inspired By

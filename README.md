@@ -28,6 +28,30 @@ If you're a law student, a professional, or just someone who is curious to exper
 - **AI Judge** - Supervised Fine-tuned Llama 3.2 (Unsloth + QLoRA)
 - **Case Data** - Indian Kanoon (50+ constitutional and fundamental rights cases)
 
+## Model Performance 
+
+Fine-tuned **Llama 3.2-3B** on 504 moot court argument-scoring examples 
+using Unsloth + LoRA (r=16) on Kaggle T4x2.
+
+| Metric | Value |
+|--------|-------|
+| Final Training Loss | 0.85 |
+| Final Eval Loss | 0.89 |
+| Train/Eval Gap | 0.04 (no overfitting) |
+
+### Scoring Criteria MAE
+*(evaluated on held-out 10% — 50 examples)*
+
+| Criterion | MAE |
+|-----------|-----|
+| Legal Application | X.XX |
+| Issue Relevance | X.XX |
+| Argument Flow | X.XX |
+| Bench Handling | X.XX |
+
+> Judge responses and speaker switch decisions evaluated qualitatively — 
+> model produces case-specific judicial language grounded in Indian constitutional law.
+
 ## Graphics Inspired By
 
 Ace Attorney

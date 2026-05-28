@@ -1,12 +1,12 @@
 <h1 align="center">Themis</h1>
 
-Themis is a browser-based moot court simulator where two players argue opposite sides of real Indian Court cases based on constitutional and fundamental rights issues. Players present arguments, rebut opposing claims, and respond to judicial questioning. Every action you take can and will affect your scoreboard matrix in realtime based on : Legal Accuracy, Case Relevance, Logical Reasoning, and Rebuttal Quality.
+Themis is a browser-based moot court simulator where two players argue opposite sides of real Indian Court cases based on constitutional and fundamental rights issues. Players present arguments, rebut opposing claims, and respond to judicial questioning. Every action you take can and will affect your scoreboard matrix in realtime, based on : Legal Accuracy, Case Relevance, Logical Reasoning, and Rebuttal Quality.
 
 ## Is this for me?
 
-If you're a law student, a professional, or just someone who is curious to experience courtroom drama, then yess!
+If you're a law student or just someone who is curious to experience courtroom drama, then yess!
 
-## Initial Setup
+## How to Setup?
 
 > Coming soon
 
@@ -40,7 +40,8 @@ using Unsloth + LoRA (r=16) on Kaggle T4x2.
 | Train/Eval Gap | 0.04 (no overfitting) |
 
 ### Scoring Criteria MAE
-*(evaluated on held-out 10% — 50 examples)*
+*(evaluated on held-out 10% — 51
+ examples)*
 
 | Criterion | MAE |
 |-----------|-----|

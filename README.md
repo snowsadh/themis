@@ -40,8 +40,6 @@ using Unsloth + LoRA (r=16) on Kaggle T4x2.
 | Train/Eval Gap | 0.04 (no overfitting) |
 
 ### Scoring Criteria MAE
-*(evaluated on held-out 10% — 51
- examples)*
 
 | Criterion | MAE |
 |-----------|-----|
@@ -49,9 +47,6 @@ using Unsloth + LoRA (r=16) on Kaggle T4x2.
 | Issue Relevance | X.XX |
 | Argument Flow | X.XX |
 | Bench Handling | X.XX |
-
-> Judge responses and speaker switch decisions evaluated qualitatively — 
-> model produces case-specific judicial language grounded in Indian constitutional law.
 
 ## Graphics Inspired By
 

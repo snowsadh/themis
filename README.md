@@ -1,11 +1,7 @@
 <h1 align="center">Themis</h1>
-<p align="center">A browser-based moot court simulator. Argue real Indian cases. Get judged by AI in real time.</p>
+Themis is a browser-based moot court simulator where two players argue opposite sides of real Indian constitutional and fundamental rights cases. Present arguments, rebut opposing claims, and respond to judicial questioning. Every action you take can and will affect your scoreboard matrix in realtime.
 
----
-
-Themis is a 1v1 moot court simulator where two players argue opposite sides of real Indian constitutional and fundamental rights cases. Present arguments, rebut opposing claims, and respond to judicial questioning. Every action you take can and will affect your scoreboard matrix in realtime.
-
-Your performance is tracked across four dimensions: **Legal Application**, **Issue Relevance**, **Argument Flow**, and **Bench Handling**. The judge can question you, interrupt, or transfer control — just like a real courtroom.
+Your performance is tracked across four dimensions: **Legal Application**, **Issue Relevance**, **Argument Flow**, and **Bench Handling**. The judge can question you, interrupt, or transfer control.
 
 ## Is this for me?
 

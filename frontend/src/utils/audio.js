@@ -41,7 +41,7 @@ export const playTick = () => {
     gain.connect(ctx.destination);
     osc.start();
     osc.stop(ctx.currentTime + 0.05);
-  } catch (e) {}
+  } catch { /* Audio is optional when the browser blocks playback. */ }
 };
 
 export const playObjection = () => {
@@ -62,7 +62,7 @@ export const playObjection = () => {
     
     osc.start();
     osc.stop(ctx.currentTime + 0.5);
-  } catch (e) {}
+  } catch { /* Audio is optional when the browser blocks playback. */ }
 };
 
 export const playSwoosh = () => {
@@ -80,5 +80,5 @@ export const playSwoosh = () => {
     gain.connect(ctx.destination);
     osc.start();
     osc.stop(ctx.currentTime + 0.3);
-  } catch (e) {}
+  } catch { /* Audio is optional when the browser blocks playback. */ }
 };

@@ -53,6 +53,8 @@ export const useGameStore = create((set, get) => ({
   objectionActive: null,
   verdict: null,
   theme: 'dark',
+  options: { openai_key: "", openai_model: "", allow_fallback: true },
+  setOptions: (options) => set((state) => ({ options: { ...state.options, ...options } })),
   showVerdict: false,
 
   toggleTheme: () => set((state) => ({ theme: state.theme === 'dark' ? 'light' : 'dark' })),

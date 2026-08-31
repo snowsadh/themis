@@ -4,14 +4,11 @@ from dotenv import load_dotenv
 import re
 from urllib import error, request
 from typing import Optional
+from pathlib import Path
+from http.client import HTTPException as HTTPClientException
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, ValidationError
 
-load_dotenv()
-
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
-OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions")
-OPENROUTER_HTTP_REFERER = os.getenv("OPENROUTER_HTTP_REFERER", "http://localhost")
-OPENROUTER_APP_TITLE = os.getenv("OPENROUTER_APP_TITLE", "Themis.AI")
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 JUDGE_RESPONSE_FIELDS = (
     "feedback",
@@ -217,60 +214,75 @@ def build_judge_response(*, feedback, logic_score, clarity_score, confidence_sco
     }
 
 
-def call_openrouter(prompt):
-    if not OPENROUTER_API_KEY:
-        raise RuntimeError("OPENROUTER_API_KEY is not configured.")
+class JudgeUnavailable(RuntimeError):
+    pass
 
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are a strict Supreme Court judge in a moot court. Return exactly the requested format with no extra text.",
-            },
-            {
-                "role": "user",
-                "content": prompt,
-            },
-        ],
-        "temperature": 0.2,
-        "max_tokens": 500,
+
+def providers(options=None, counsel=False):
+    options = options or {}
+    candidates = []
+    prefix = "COUNSEL" if counsel else "THEMIS"
+    url, model = os.getenv(f"{prefix}_BASE_URL"), os.getenv(f"{prefix}_MODEL")
+    if url and model:
+        candidates.append(("Fine-tuned judge" if not counsel else "AI counsel", url.rstrip("/") + "/chat/completions", model, os.getenv(f"{prefix}_API_KEY", "")))
+    # Preserve compatibility with the original OpenRouter configuration.
+    if not candidates and os.getenv("OPENROUTER_API_KEY"):
+        candidates.append(("OpenRouter", os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions"), os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini"), os.getenv("OPENROUTER_API_KEY")))
+    key = options.get("openai_key") or os.getenv("OPENAI_API_KEY")
+    if options.get("allow_fallback", True) and key:
+        candidates.append(("OpenAI fallback", "https://api.openai.com/v1/chat/completions", options.get("openai_model") or os.getenv("OPENAI_MODEL", "gpt-4o-mini"), key))
+    return candidates
+
+
+def configuration_status():
+    return {
+        "judge_configured": bool(providers()),
+        "counsel_configured": bool(providers(counsel=True)),
+        "primary_judge_configured": bool(providers({"allow_fallback": False})),
+        "primary_counsel_configured": bool(providers({"allow_fallback": False}, counsel=True)),
+        "fine_tuned_configured": bool(os.getenv("THEMIS_BASE_URL") and os.getenv("THEMIS_MODEL")),
+        "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
+        "openai_model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
     }
 
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": OPENROUTER_HTTP_REFERER,
-        "X-Title": OPENROUTER_APP_TITLE,
-    }
 
-    request_data = json.dumps(payload).encode("utf-8")
-    http_request = request.Request(OPENROUTER_BASE_URL, data=request_data, headers=headers, method="POST")
-
+def completion(provider, messages):
+    label, url, model, key = provider
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    payload = {"model": model, "messages": messages, "max_completion_tokens": 900} if label == "OpenAI fallback" else {"model": model, "messages": messages, "max_tokens": 900, "temperature": 0.2}
     try:
-        with request.urlopen(http_request, timeout=30) as response:
-            response_payload = json.loads(response.read().decode("utf-8"))
-    except error.HTTPError as exc:
-        error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
-        raise RuntimeError(f"OpenRouter request failed with status {exc.code}: {error_body}") from exc
-    except error.URLError as exc:
-        raise RuntimeError(f"OpenRouter request failed: {exc.reason}") from exc
+        req = request.Request(url, data=json.dumps(payload).encode(), headers=headers, method="POST")
+        try:
+            configured_timeout = float(os.getenv("MODEL_TIMEOUT_SECONDS", "90"))
+            timeout = max(5, min(120, configured_timeout))
+        except ValueError:
+            timeout = 90
+        with request.urlopen(req, timeout=45 if label == "OpenAI fallback" else timeout) as response:
+            data = json.loads(response.read(1_000_000))
+        content = data["choices"][0]["message"]["content"]
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("Empty response")
+        return content.strip()
+    except (error.URLError, OSError, HTTPClientException, ValueError, KeyError, IndexError, TypeError) as exc:
+        # Provider bodies can contain secrets or user submissions. Never expose them.
+        raise JudgeUnavailable(f"{label} could not respond. Check its connection, model and credentials.") from exc
 
-    choices = response_payload.get("choices") or []
-    if not choices:
-        raise RuntimeError("OpenRouter response did not include any choices.")
 
-    message = choices[0].get("message") or {}
-    content = message.get("content")
-    if isinstance(content, list):
-        content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
 
-    if not isinstance(content, str) or not content.strip():
-        raise RuntimeError("OpenRouter response did not include readable content.")
-
-    return content.strip()
-
-def evaluate_argument(role, argument, history, selected_case=None):
+def call_openrouter(prompt, options=None):
+    messages = [
+        {"role": "system", "content": "You are a strict Supreme Court judge in a moot court. Return exactly the requested format with no extra text."},
+        {"role": "user", "content": prompt},
+    ]
+    for provider in providers(options):
+        try:
+            return completion(provider, messages)
+        except JudgeUnavailable:
+            continue
+    raise JudgeUnavailable("The judge is unavailable. Check its connection and retry. Your submission has not been scored.")
+def evaluate_argument(role, argument, history, selected_case=None, options=None):
     """
     Evaluates a legal argument in a moot court setting.
     """
@@ -339,7 +351,7 @@ INTERRUPT: [YES or NO]
 """
     
     try:
-        text = call_openrouter(prompt)
+        text = call_openrouter(prompt, options)
 
         # Parse response with regex
         feedback_match = re.search(r'FEEDBACK:\s*(.+?)(?=\n[A-Z]+:|$)', text, re.DOTALL)
@@ -367,14 +379,5 @@ INTERRUPT: [YES or NO]
             reasoning_breakdown=rubric_breakdown,
         )
         
-    except Exception as e:
-        print(f"Error in evaluate_argument: {e}")
-        return build_judge_response(
-            feedback="The court experienced a technical difficulty. Please repeat your argument.",
-            logic_score=0,
-            clarity_score=0,
-            confidence_score=0,
-            interrupt=True,
-            evidence=retrieved_evidence,
-            reasoning_breakdown=rubric_breakdown,
-        )
+    except Exception as exc:
+        raise JudgeUnavailable("The judge is unavailable. Check its connection and retry. Your submission has not been scored.") from exc

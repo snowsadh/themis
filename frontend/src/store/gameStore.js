@@ -15,6 +15,12 @@ export const TURN_STATES = {
   END: 'END',
 };
 
+export const CRITERIA = {
+  legal_application: "Legal application",
+  issue_relevance: "Issue relevance",
+  argument_flow: "Argument flow",
+  bench_handling: "Bench handling",
+};
 const initialScores = {
   petitioner: { logic: 0, clarity: 0, confidence: 0, total: 0, evidence: [], reasoning_breakdown: null, history: [] },
   respondent: { logic: 0, clarity: 0, confidence: 0, total: 0, evidence: [], reasoning_breakdown: null, history: [] },

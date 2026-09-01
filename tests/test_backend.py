@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 from backend.main import app
-from backend.judge import JudgeUnavailable, providers, completion
+from backend.judge import JudgeUnavailable, providers, completion, parse_evaluation
 
 CASE = {"title": "Practice case", "facts": "A blanket surveillance measure is challenged.", "issues": ["Is it proportionate?"], "precedents": ["Puttaswamy"]}
 RESULT = {"delta_scores": {"legal_application": 2, "issue_relevance": 3, "argument_flow": 1, "bench_handling": None}, "judge_response": "Counsel, address necessity.", "speaker_switch": False, "judge_notes": "Apply the test to the facts."}
@@ -27,6 +27,15 @@ class BackendTests(unittest.TestCase):
 
 
 
+    def test_validation(self):
+        for text in ['', '   ', 'x' * 6001]:
+            self.assertEqual(self.client.post('/argue', json={**PAYLOAD, 'text': text}).status_code, 422)
+        response = self.client.post('/argue', json={**PAYLOAD, 'role': 'Invalid', 'options': {'openai_key': 'secret-sentinel'}})
+        self.assertEqual(response.status_code, 422)
+        self.assertNotIn('secret-sentinel', response.text)
+        for value in [4, -4, 2.5, True, '2']:
+            with self.assertRaises(ValueError):
+                parse_evaluation(json.dumps({**RESULT, 'delta_scores': {**RESULT['delta_scores'], 'legal_application': value}}))
 
 
 

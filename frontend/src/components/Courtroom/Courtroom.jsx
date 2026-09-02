@@ -13,6 +13,7 @@ import './Courtroom.css';
 
 export default function Courtroom() {
   const {
+    error,
     matchMode,
     turnState, timer, timerActive, tickTimer, setTurn,
     petitionerName, respondentName, selectedCase,
@@ -92,6 +93,7 @@ export default function Courtroom() {
 
   return (
     <div className="courtroom-bg">
+      {error && <p role="alert">{error} No points were added or lost.</p>}
       {/* Ambient particles */}
       <div className="courtroom-particles" />
 

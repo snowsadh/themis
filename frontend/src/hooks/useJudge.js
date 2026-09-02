@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useGameStore } from '../store/gameStore';
+import { api } from '../utils/api';
 
 const JUDGE_OPENINGS = [
   "This Court takes up the matter of {CASE}. Proceed, Counsel.",
@@ -20,16 +21,11 @@ export function useJudge() {
     advanceToOtherSpeaker,
   } = useGameStore();
   const [isProcessing, setIsProcessing] = useState(false);
-  const wsRef = useRef(null);
+  const busy = useRef(false);
   const synthRef = useRef(null);
   const voicesRef = useRef([]);
 
   useEffect(() => {
-    wsRef.current = new WebSocket("ws://localhost:8000/ws");
-    wsRef.current.onopen = () => console.log("WebSocket connected");
-    wsRef.current.onerror = (e) => console.error("WebSocket error:", e);
-    wsRef.current.onclose = () => console.log("WebSocket closed");
-
     // Initialize speech synthesis
     if ('speechSynthesis' in window) {
       synthRef.current = window.speechSynthesis;
@@ -43,7 +39,6 @@ export function useJudge() {
     }
 
     return () => {
-      if (wsRef.current) wsRef.current.close();
       if (synthRef.current) {
         synthRef.current.cancel();
       }
@@ -117,77 +112,33 @@ export function useJudge() {
   }, []);
 
   const processArgument = useCallback(async (text, side) => {
-    if (!text.trim() || isProcessing) return;
+    if (!text.trim() || busy.current) return;
+    busy.current = true;
     setIsProcessing(true);
+    useGameStore.getState().setError("");
 
     const runTurn = async (turnText, turnSide, { isBot = false } = {}) => {
-      addTranscript({ type: turnSide, text: turnText, bot: isBot });
-
       beginJudgePhase();
 
       let judgeResponse = null;
       try {
         const state = useGameStore.getState();
         const selectedCaseData = state.selectedCase;
+        const sessionId = state.sessionId;
 
-        const history = state.transcript.map(t => ({
+        const history = state.transcript.filter(t => ["judge", "petitioner", "respondent"].includes(t.type)).slice(-60).map(t => ({
           role: t.type === 'judge' ? 'Judge' : (t.type === 'petitioner' ? 'Petitioner' : 'Respondent'),
           argument: t.text
         }));
 
         const roleName = turnSide === 'petitioner' ? 'Petitioner' : 'Respondent';
 
-        judgeResponse = await new Promise((resolve, reject) => {
-          if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-            reject(new Error("WebSocket not connected"));
-            return;
-          }
-
-          let timeoutId;
-
-          const cleanup = () => {
-            wsRef.current.removeEventListener("message", handleMessage);
-            wsRef.current.removeEventListener("error", handleError);
-            wsRef.current.removeEventListener("close", handleClose);
-            clearTimeout(timeoutId);
-          };
-
-          const handleMessage = (event) => {
-            cleanup();
-            try {
-              const data = JSON.parse(event.data);
-              resolve(data);
-            } catch (_error) {
-              reject(new Error("Invalid JSON response from server"));
-            }
-          };
-
-          const handleError = (error) => {
-            cleanup();
-            reject(error);
-          };
-
-          const handleClose = () => {
-            cleanup();
-            reject(new Error("WebSocket closed unexpectedly"));
-          };
-
-          wsRef.current.addEventListener("message", handleMessage);
-          wsRef.current.addEventListener("error", handleError);
-          wsRef.current.addEventListener("close", handleClose);
-
-          timeoutId = setTimeout(() => {
-            cleanup();
-            reject(new Error("Timeout waiting for judge response"));
-          }, 20000);
-
-          wsRef.current.send(JSON.stringify({
-            role: roleName,
-            text: turnText,
-            history: history,
-            selectedCase: selectedCaseData,
-          }));
+        const { response } = await api("/argue", {
+          role: roleName, text: turnText, history,
+          selectedCase: selectedCaseData, options: state.options,
         });
+        if (useGameStore.getState().sessionId !== sessionId) return null;
+        judgeResponse = response;
 
         const {
           feedback = "The Court acknowledges your submission.",
@@ -214,27 +165,17 @@ export function useJudge() {
           ? { speaker: turnSide, attempt: nextAttempt, max: 2 }
           : null;
 
+        addTranscript({ type: turnSide, text: turnText, bot: isBot });
+        if (!isBot) useGameStore.getState().setDraft(turnSide, "");
         updateScores(turnSide, scores);
         setJudgeMessage(feedback, interrupt, interruptContext);
         await speak(feedback, { interrupt });
         addTranscript({ type: 'judge', text: feedback, scores });
-      } catch (e) {
-        console.error("Backend error:", e);
-        const fallback = "The court's connection was dropped. Counsel, please proceed.";
-        const fallbackScores = {
-          logic: 5,
-          clarity: 5,
-          confidence: 5,
-          feedback: fallback,
-          evidence: [],
-          reasoning_breakdown: null,
-        };
-
-        setJudgeMessage(fallback, false);
-        addTranscript({ type: 'judge', text: fallback, scores: fallbackScores });
-        updateScores(turnSide, fallbackScores);
-        await speak(fallback, { interrupt: false });
-        judgeResponse = { feedback: fallback, interrupt: false };
+      } catch (error) {
+        const state = useGameStore.getState();
+        state.setError(error.message);
+        state.restoreTurn(turnSide);
+        return null;
       }
 
       await new Promise((resolve) => setTimeout(resolve, judgeResponse?.interrupt ? 120 : 220));
@@ -256,13 +197,14 @@ export function useJudge() {
     try {
       const humanResponse = await runTurn(text, side);
 
-      if (matchMode === '1VBOT' && side === 'petitioner' && !humanResponse?.interrupt) {
+      if (humanResponse && matchMode === '1VBOT' && side === 'petitioner' && !humanResponse.interrupt) {
         const state = useGameStore.getState();
         const botText = buildBotArgument('respondent', state.selectedCase, state.transcript);
         await new Promise((resolve) => setTimeout(resolve, 900));
         await runTurn(botText, 'respondent', { isBot: true });
       }
     } finally {
+      busy.current = false;
       setIsProcessing(false);
     }
   }, [

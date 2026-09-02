@@ -59,6 +59,12 @@ export const useGameStore = create((set, get) => ({
   objectionActive: null,
   verdict: null,
   theme: 'dark',
+  drafts: { petitioner: "", respondent: "" },
+  sessionId: 0,
+  error: "",
+  setError: (error) => set({ error }),
+  setDraft: (side, text) => set((state) => ({ drafts: { ...state.drafts, [side]: text } })),
+  restoreTurn: (side) => set({ currentSpeaker: side, turnState: side.toUpperCase(), timerActive: true }),
   options: { openai_key: "", openai_model: "", allow_fallback: true },
   setOptions: (options) => set((state) => ({ options: { ...state.options, ...options } })),
   showVerdict: false,
@@ -82,6 +88,9 @@ export const useGameStore = create((set, get) => ({
     const respondentName = config.respondentName || state.respondentName;
 
     return {
+      sessionId: state.sessionId + 1,
+      drafts: { petitioner: "", respondent: "" },
+      error: "",
       phase: GAME_PHASES.COURTROOM,
       matchMode,
       turnState: TURN_STATES.PETITIONER,
@@ -228,7 +237,10 @@ export const useGameStore = create((set, get) => ({
     set({ verdict, showVerdict: true, phase: GAME_PHASES.VERDICT, turnState: TURN_STATES.END, timerActive: false });
   },
 
-  resetGame: () => set({
+  resetGame: () => set((state) => ({
+    sessionId: state.sessionId + 1,
+    drafts: { petitioner: "", respondent: "" },
+    error: "",
     phase: GAME_PHASES.LOBBY,
     matchMode: '1V1',
     turnState: TURN_STATES.WAITING,
@@ -253,5 +265,5 @@ export const useGameStore = create((set, get) => ({
     objectionActive: null,
     verdict: null,
     showVerdict: false,
-  }),
+  })),
 }));

@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, SecretStr, ValidationError, model_validator
 from starlette.concurrency import run_in_threadpool
 
-from .judge import JudgeUnavailable, configuration_status, evaluate_argument
+from .judge import JudgeUnavailable, configuration_status, evaluate_argument, generate_counsel
 MAX_CASE_CHARACTERS = 30000
 
 app = FastAPI(title="Themis", docs_url="/docs")
@@ -56,6 +56,14 @@ class Submission(BaseModel):
     selectedCase: Case
     options: Options = Field(default_factory=Options)
 
+
+
+
+class CounselRequest(BaseModel):
+    role: Literal["Petitioner", "Respondent"]
+    history: list[Turn] = Field(default_factory=list, max_length=60)
+    selectedCase: Case
+    options: Options = Field(default_factory=Options)
 
 
 
@@ -113,3 +121,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({"error": exc.detail})
     except WebSocketDisconnect:
         pass
+
+
+@app.post("/counsel")
+def counsel(arg: CounselRequest):
+    try:
+        return generate_counsel(arg.role, [t.model_dump() for t in arg.history], arg.selectedCase.model_dump(), arg.options.provider_options())
+    except JudgeUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc

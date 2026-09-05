@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, SecretStr, ValidationError, model_validat
 from starlette.concurrency import run_in_threadpool
 
 from .judge import JudgeUnavailable, configuration_status, evaluate_argument, generate_counsel
-from .cases import MAX_CASE_CHARACTERS, search_cases
+from .cases import MAX_CASE_CHARACTERS, extract_document, read_upload, search_cases
 
 app = FastAPI(title="Themis", docs_url="/docs")
 app.add_middleware(CORSMiddleware, allow_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(","), allow_methods=["GET", "POST"], allow_headers=["Content-Type"])
@@ -135,3 +135,10 @@ def counsel(arg: CounselRequest):
 @app.get("/cases")
 def cases(q: str = Query(default="", max_length=200), category: str = Query(default="", max_length=100), offset: int = Query(default=0, ge=0, le=10000), limit: int = Query(default=12, ge=1, le=50)):
     return search_cases(q, category, offset, limit)
+
+
+
+@app.post("/cases/import")
+async def import_case(request: Request):
+    filename, data = await read_upload(request)
+    return await run_in_threadpool(extract_document, filename, data)

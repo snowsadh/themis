@@ -851,3 +851,98 @@ html:has(dialog[open]) {
 .stage-preview .stage-vignette {
   background: linear-gradient(90deg, #fae2c5e0, transparent 65%);
 }
+
+.import-heading {
+  display: flex;
+  gap: 25px;
+  align-items: center;
+  margin-bottom: 26px;
+}
+.import-heading h2 {
+  font-size: 36px;
+}
+.import-heading p {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 12px;
+}
+.folder-illustration {
+  width: 85px;
+  height: 72px;
+  background: #dfd1ef;
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  box-shadow: 4px 4px 0 var(--ink);
+  display: grid;
+  place-items: center;
+  font: 40px Georgia;
+  transform: rotate(-8deg);
+  flex-shrink: 0;
+}
+.upload-zone {
+  position: relative;
+  border: 2px dashed #b7a6c7;
+  background: #f0eaf7;
+  border-radius: 16px;
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  text-align: center;
+  gap: 9px;
+  padding: 24px;
+  cursor: pointer;
+}
+.upload-zone:hover,
+.upload-zone:focus-within {
+  background: #e6daf3;
+  border-color: #70518e;
+}
+.upload-zone input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.upload-zone span:last-of-type {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.upload-symbol {
+  font-size: 30px;
+}
+.paste-divider {
+  text-align: center;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  margin: 24px 0 18px;
+}
+.paste-case {
+  margin-bottom: 15px;
+}
+.import-dialog .form-note {
+  margin-top: 18px;
+}
+.import-review {
+  display: grid;
+  gap: 20px;
+}
+.case-text-review {
+  min-height: 220px;
+}
+.file-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.file-chips span {
+  background: var(--sage);
+  border-radius: 7px;
+  padding: 7px 10px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}

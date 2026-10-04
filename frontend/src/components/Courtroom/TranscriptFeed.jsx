@@ -1,74 +1,58 @@
-import { useGameStore } from '../../store/gameStore';
-import { useEffect, useRef } from 'react';
-import { highlightLegalTerms } from '../../utils/formatters';
-
+import { CRITERIA, useGameStore } from "../../store/gameStore";
 export default function TranscriptFeed() {
   const { transcript } = useGameStore();
-  const bottomRef = useRef(null);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [transcript]);
-
-  const getIcon = (type) => {
-    if (type === 'judge') return '⚖️';
-    if (type === 'petitioner') return '🔵';
-    if (type === 'respondent') return '🔴';
-    if (type === 'objection') return '🚫';
-    return '📝';
-  };
-
-  const getClass = (type) => {
-    if (type === 'judge') return 'entry-judge';
-    if (type === 'petitioner') return 'entry-petitioner';
-    if (type === 'respondent') return 'entry-respondent';
-    if (type === 'objection') return 'entry-objection';
-    return '';
-  };
-
   return (
-    <div className="transcript-wrap">
+    <section className="transcript-wrap">
       <div className="transcript-header">
-        <span className="transcript-title">📜 LIVE TRANSCRIPT</span>
-        <span className="transcript-count">{transcript.length} entries</span>
+        <h2 className="transcript-title">The court record</h2>
+        <span>{transcript.length} entries</span>
       </div>
       <div className="transcript-body">
-        {transcript.length === 0 && (
-          <div className="transcript-empty">Court proceedings will appear here...</div>
-        )}
         {transcript.map((entry) => (
-          <div key={entry.id} className={`transcript-entry ${getClass(entry.type)} fade-in`}>
-            <div className="entry-icon">{getIcon(entry.type)}</div>
+          <article
+            key={entry.id}
+            className={`transcript-entry entry-${entry.type}`}
+          >
+            <div className="entry-icon" aria-hidden="true">
+              {entry.type === "judge"
+                ? "⚖"
+                : entry.type === "petitioner"
+                  ? "P"
+                  : "R"}
+            </div>
             <div className="entry-content">
               <div className="entry-label">
-                {entry.type === 'judge' ? 'HON\'BLE BENCH' :
-                 entry.type === 'petitioner' ? (entry.bot ? 'PETITIONER (BOT)' : 'PETITIONER') :
-                 entry.type === 'respondent' ? (entry.bot ? 'RESPONDENT (BOT)' : 'RESPONDENT') : 'OBJECTION'}
+                {entry.type === "judge" ? "The bench" : entry.type}
+                {entry.bot ? " · opposing counsel" : ""}
                 <span className="entry-time">{entry.timestamp}</span>
               </div>
-              <div className="entry-text">{highlightLegalTerms(entry.text)}</div>
-              {entry.scores && (
-                <div className="entry-scores">
-                  <span>Logic: {entry.scores.logic}</span>
-                  <span>Clarity: {entry.scores.clarity}</span>
-                  <span>Confidence: {entry.scores.confidence}</span>
-                  {entry.scores.feedback && <span className="entry-feedback">{entry.scores.feedback}</span>}
-                </div>
-              )}
-              {entry.scores?.evidence?.length > 0 && (
-                <div className="entry-scores">
-                  {entry.scores.evidence.map((item, index) => (
-                    <span key={`${entry.id}-evidence-${index}`} className="entry-feedback">
-                      Evidence {index + 1}: {item.label} [{item.match_count} matches]
-                    </span>
-                  ))}
-                </div>
+              <p className="entry-text">{entry.text}</p>
+              {entry.evaluation && (
+                <details className="assessment">
+                  <summary>Assessment · {entry.evaluation.provider}</summary>
+                  <div className="entry-scores">
+                    {Object.entries(CRITERIA).map(([key, label]) => (
+                      <span key={key}>
+                        {label}:{" "}
+                        {entry.evaluation.delta_scores[key] ?? "Not assessed"}
+                      </span>
+                    ))}
+                  </div>
+                  <p>{entry.evaluation.judge_notes}</p>
+                  {entry.evaluation.evidence?.length > 0 && (
+                    <p className="muted">
+                      Related brief passages (keyword matches, not verified
+                      citations):{" "}
+                      {entry.evaluation.evidence.map((e) => e.label).join(", ")}
+                      .
+                    </p>
+                  )}
+                </details>
               )}
             </div>
-          </div>
+          </article>
         ))}
-        <div ref={bottomRef} />
       </div>
-    </div>
+    </section>
   );
 }

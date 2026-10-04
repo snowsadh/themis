@@ -3,38 +3,12 @@ import os
 from dotenv import load_dotenv
 import re
 from urllib import error, request
+from http.client import HTTPException as HTTPClientException
 from typing import Optional
 from pathlib import Path
-from http.client import HTTPException as HTTPClientException
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, ValidationError
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
-
-JUDGE_RESPONSE_FIELDS = (
-    "feedback",
-    "score",
-    "logic_score",
-    "clarity_score",
-    "confidence_score",
-    "interrupt",
-    "evidence",
-    "reasoning_breakdown",
-)
-
-SCORING_RUBRIC = {
-    "logic": {
-        "definition": "Measure legal relevance, precedent use, and factual consistency with the selected case.",
-        "criteria": ["case_relevance", "precedent_use", "factual_consistency"],
-    },
-    "clarity": {
-        "definition": "Measure structure, directness, and whether the submission answers the legal issue clearly.",
-        "criteria": ["structure", "directness"],
-    },
-    "confidence": {
-        "definition": "Measure courtroom tone, composure, and assertiveness without overclaiming.",
-        "criteria": ["tone", "composure", "assertiveness"],
-    },
-}
 
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 STOPWORDS = {
@@ -44,15 +18,6 @@ STOPWORDS = {
     "should", "could", "do", "does", "did", "not", "but", "we", "they", "you",
     "your", "our", "their", "his", "her", "there", "here", "case", "court",
 }
-
-HEDGING_WORDS = {"maybe", "perhaps", "might", "possibly", "i think", "i guess", "probably"}
-ASSERTIVE_WORDS = {"submit", "contend", "assert", "maintain", "demonstrates", "shows", "establishes"}
-STRUCTURE_MARKERS = {"first", "second", "therefore", "because", "hence", "thus", "however", "finally"}
-
-
-def clamp_score(value, minimum=0, maximum=10):
-    return max(minimum, min(maximum, value))
-
 
 def normalize_text(text: Optional[str]) -> str:
     return (text or "").strip().lower()
@@ -149,73 +114,26 @@ def retrieve_case_evidence(selected_case, argument, history, limit=4):
     return top_chunks
 
 
-def build_reasoning_breakdown(argument, retrieved_evidence):
-    normalized_argument = normalize_text(argument)
-    argument_tokens = tokenize(argument)
-    token_count = len(argument_tokens)
-
-    top_match_count = max((item.get("match_count", 0) for item in retrieved_evidence), default=0)
-    precedent_hits = sum(1 for item in retrieved_evidence if item.get("chunk_type") == "precedents" and item.get("match_count", 0) > 0)
-    has_citation_style = bool(re.search(r"\bv\.?\b|\barticle\b|\bsection\b|\bipc\b", normalized_argument))
-
-    logic_relevance = clamp_score(4 + top_match_count)
-    logic_precedent = clamp_score(5 + precedent_hits + (1 if has_citation_style else 0))
-    logic_consistency = clamp_score(3 + top_match_count)
-
-    sentence_count = max(1, len([segment for segment in re.split(r"[.?!]", argument or "") if segment.strip()]))
-    structure_hits = sum(1 for marker in STRUCTURE_MARKERS if marker in normalized_argument)
-    clarity_structure = clamp_score(4 + structure_hits + (1 if sentence_count >= 2 else 0))
-    clarity_directness = clamp_score(7 if 25 <= token_count <= 170 else 5)
-
-    hedge_hits = sum(1 for word in HEDGING_WORDS if word in normalized_argument)
-    exclamation_overuse = (argument or "").count("!") >= 3
-    all_caps_ratio = 0
-    alpha_chars = [ch for ch in (argument or "") if ch.isalpha()]
-    if alpha_chars:
-        all_caps_ratio = sum(1 for ch in alpha_chars if ch.isupper()) / len(alpha_chars)
-
-    confidence_tone = clamp_score(7 - hedge_hits)
-    confidence_composure = clamp_score(7 - (2 if exclamation_overuse else 0) - (2 if all_caps_ratio > 0.35 else 0))
-    assertive_hits = sum(1 for word in ASSERTIVE_WORDS if word in normalized_argument)
-    confidence_assertiveness = clamp_score(5 + assertive_hits)
-
-    return {
-        "rubric": SCORING_RUBRIC,
-        "diagnostics": {
-            "logic": {
-                "case_relevance": logic_relevance,
-                "precedent_use": logic_precedent,
-                "factual_consistency": logic_consistency,
-            },
-            "clarity": {
-                "structure": clarity_structure,
-                "directness": clarity_directness,
-            },
-            "confidence": {
-                "tone": confidence_tone,
-                "composure": confidence_composure,
-                "assertiveness": confidence_assertiveness,
-            },
-        },
-    }
-
-
-def build_judge_response(*, feedback, logic_score, clarity_score, confidence_score, interrupt, evidence=None, reasoning_breakdown=None):
-    overall_score = round((logic_score + clarity_score + confidence_score) / 3, 1)
-    return {
-        "feedback": feedback,
-        "score": overall_score,
-        "logic_score": logic_score,
-        "clarity_score": clarity_score,
-        "confidence_score": confidence_score,
-        "interrupt": interrupt,
-        "evidence": evidence or [],
-        "reasoning_breakdown": reasoning_breakdown or {"rubric": SCORING_RUBRIC, "diagnostics": {}},
-    }
+CRITERIA = ("legal_application", "issue_relevance", "argument_flow", "bench_handling")
 
 
 class JudgeUnavailable(RuntimeError):
     pass
+
+
+class DeltaScores(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    legal_application: StrictInt = Field(ge=-3, le=3)
+    issue_relevance: StrictInt = Field(ge=-3, le=3)
+    argument_flow: StrictInt = Field(ge=-3, le=3)
+    bench_handling: Optional[StrictInt] = Field(ge=-3, le=3)
+
+
+class Evaluation(BaseModel):
+    delta_scores: DeltaScores
+    judge_response: str = Field(min_length=1, max_length=3000)
+    speaker_switch: StrictBool
+    judge_notes: str = Field(default="", max_length=3000)
 
 
 def providers(options=None, counsel=False):
@@ -270,137 +188,6 @@ def completion(provider, messages):
         raise JudgeUnavailable(f"{label} could not respond. Check its connection, model and credentials.") from exc
 
 
-
-def call_openrouter(prompt, options=None):
-    messages = [
-        {"role": "system", "content": "You are a strict Supreme Court judge in a moot court. Return exactly the requested format with no extra text."},
-        {"role": "user", "content": prompt},
-    ]
-    for provider in providers(options):
-        try:
-            return completion(provider, messages)
-        except JudgeUnavailable:
-            continue
-    raise JudgeUnavailable("The judge is unavailable. Check its connection and retry. Your submission has not been scored.")
-def evaluate_argument(role, argument, history, selected_case=None, options=None):
-    """
-    Evaluates a legal argument in a moot court setting.
-    """
-    
-    # Build context from history
-    context_str = ""
-    if history:
-        context_str = "\n".join([
-            f"{turn.get('role', 'Unknown')}: {turn.get('argument', '')}"
-            for turn in history[-6:]
-        ])
-
-    retrieved_evidence = retrieve_case_evidence(selected_case, argument, history)
-    rubric_breakdown = build_reasoning_breakdown(argument, retrieved_evidence)
-    evidence_str = "\n".join([
-        f"- [{item['match_count']} matches] {item['label']} ({item['chunk_type']}): {item['text']}"
-        for item in retrieved_evidence
-    ]) if retrieved_evidence else "No case evidence matched strongly enough."
-
-    rubric_str = "\n".join([
-        f"- LOGIC: {SCORING_RUBRIC['logic']['definition']} (criteria: {', '.join(SCORING_RUBRIC['logic']['criteria'])})",
-        f"- CLARITY: {SCORING_RUBRIC['clarity']['definition']} (criteria: {', '.join(SCORING_RUBRIC['clarity']['criteria'])})",
-        f"- CONFIDENCE: {SCORING_RUBRIC['confidence']['definition']} (criteria: {', '.join(SCORING_RUBRIC['confidence']['criteria'])})",
-    ])
-
-    case_context = "No case selected."
-    if selected_case:
-        case_context = f"CASE: {selected_case.get('title', 'Selected Case')}\nSUBTITLE: {selected_case.get('subtitle', '')}\nFACTS: {selected_case.get('facts', '')}\nISSUES: {', '.join(selected_case.get('issues', []) or [])}\nPRECEDENTS: {', '.join(selected_case.get('precedents', []) or [])}"
-    
-    prompt = f"""You are a Supreme Court judge presiding over a moot court session. Your role is to evaluate arguments critically, ask probing questions, and maintain courtroom decorum.
-
-CURRENT SPEAKER: {role}
-CURRENT ARGUMENT: {argument}
-
-SELECTED CASE:
-{case_context}
-
-PREVIOUS ARGUMENTS:
-{context_str if context_str else "This is the opening statement."}
-
-RETRIEVED CASE EVIDENCE:
-{evidence_str}
-
-RUBRIC YOU MUST APPLY:
-{rubric_str}
-
-YOUR TASK:
-1. Evaluate this argument on:
-   - Legal logic and precedent citation (0-10)
-   - Clarity and structure (0-10)  
-   - Confidence and delivery (0-10)
-
-2. Provide brief, sharp feedback (2-3 sentences max). Be a real judge:
-   - If the argument is weak, vague, or irrelevant, INTERRUPT and demand clarification
-   - If it's substantive, acknowledge it and probe deeper with a pointed question
-   - If it's off-topic or nonsensical, call it out directly
-
-3. Decide if you need to interrupt (if argument is unclear, off-topic, or needs immediate clarification)
-
-RESPOND IN EXACTLY THIS FORMAT (no extra text):
-FEEDBACK: [your 2-3 sentence response as a judge]
-LOGIC: [score 0-10]
-CLARITY: [score 0-10]
-CONFIDENCE: [score 0-10]
-INTERRUPT: [YES or NO]
-"""
-    
-    try:
-        text = call_openrouter(prompt, options)
-
-        # Parse response with regex
-        feedback_match = re.search(r'FEEDBACK:\s*(.+?)(?=\n[A-Z]+:|$)', text, re.DOTALL)
-        logic_match = re.search(r'LOGIC:\s*(\d+)', text)
-        clarity_match = re.search(r'CLARITY:\s*(\d+)', text)
-        confidence_match = re.search(r'CONFIDENCE:\s*(\d+)', text)
-        interrupt_match = re.search(r'INTERRUPT:\s*(YES|NO)', text, re.IGNORECASE)
-        
-        feedback = feedback_match.group(1).strip() if feedback_match else "The court acknowledges your submission."
-        logic_score = int(logic_match.group(1)) if logic_match else 5
-        clarity_score = int(clarity_match.group(1)) if clarity_match else 5
-        confidence_score = int(confidence_match.group(1)) if confidence_match else 5
-        logic_score = clamp_score(logic_score)
-        clarity_score = clamp_score(clarity_score)
-        confidence_score = clamp_score(confidence_score)
-        interrupt = interrupt_match.group(1).upper() == "YES" if interrupt_match else False
-
-        return build_judge_response(
-            feedback=feedback,
-            logic_score=logic_score,
-            clarity_score=clarity_score,
-            confidence_score=confidence_score,
-            interrupt=interrupt,
-            evidence=retrieved_evidence,
-            reasoning_breakdown=rubric_breakdown,
-        )
-        
-    except Exception as exc:
-        raise JudgeUnavailable("The judge is unavailable. Check its connection and retry. Your submission has not been scored.") from exc
-
-
-CRITERIA = ("legal_application", "issue_relevance", "argument_flow", "bench_handling")
-
-
-class DeltaScores(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    legal_application: StrictInt = Field(ge=-3, le=3)
-    issue_relevance: StrictInt = Field(ge=-3, le=3)
-    argument_flow: StrictInt = Field(ge=-3, le=3)
-    bench_handling: Optional[StrictInt] = Field(ge=-3, le=3)
-
-
-class Evaluation(BaseModel):
-    delta_scores: DeltaScores
-    judge_response: str = Field(min_length=1, max_length=3000)
-    speaker_switch: StrictBool
-    judge_notes: str = Field(default="", max_length=3000)
-
-
 def parse_evaluation(text):
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
     result = Evaluation.model_validate_json(text)
@@ -422,7 +209,7 @@ Set speaker_switch false only when asking this counsel a follow-up; otherwise tr
 """
 
 
-def evaluate_assessment(role, argument, history, selected_case=None, options=None):
+def evaluate_argument(role, argument, history, selected_case=None, options=None):
     case = selected_case or {}
     side = role.lower()
     previous = history[-1] if history else None
@@ -451,7 +238,6 @@ def evaluate_assessment(role, argument, history, selected_case=None, options=Non
         except (JudgeUnavailable, ValidationError, ValueError):
             continue
     raise JudgeUnavailable("The judge is unavailable or returned an invalid assessment. Check advanced connection settings and retry. Your submission has not been scored.")
-
 
 
 def counsel_history(history, budget=12000):

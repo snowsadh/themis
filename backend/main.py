@@ -57,14 +57,11 @@ class Submission(BaseModel):
     options: Options = Field(default_factory=Options)
 
 
-
-
 class CounselRequest(BaseModel):
     role: Literal["Petitioner", "Respondent"]
     history: list[Turn] = Field(default_factory=list, max_length=60)
     selectedCase: Case
     options: Options = Field(default_factory=Options)
-
 
 
 @app.exception_handler(RequestValidationError)
@@ -78,8 +75,15 @@ def health():
     return {"status": "ok", **configuration_status()}
 
 
+@app.get("/cases")
+def cases(q: str = Query(default="", max_length=200), category: str = Query(default="", max_length=100), offset: int = Query(default=0, ge=0, le=10000), limit: int = Query(default=12, ge=1, le=50)):
+    return search_cases(q, category, offset, limit)
 
 
+@app.post("/cases/import")
+async def import_case(request: Request):
+    filename, data = await read_upload(request)
+    return await run_in_threadpool(extract_document, filename, data)
 
 
 def evaluate(arg):
@@ -96,6 +100,12 @@ def argue(arg: Submission):
     return {"response": evaluate(arg)}
 
 
+@app.post("/counsel")
+def counsel(arg: CounselRequest):
+    try:
+        return generate_counsel(arg.role, [t.model_dump() for t in arg.history], arg.selectedCase.model_dump(), arg.options.provider_options())
+    except JudgeUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
 
 
 @app.websocket("/ws")
@@ -121,24 +131,3 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({"error": exc.detail})
     except WebSocketDisconnect:
         pass
-
-
-@app.post("/counsel")
-def counsel(arg: CounselRequest):
-    try:
-        return generate_counsel(arg.role, [t.model_dump() for t in arg.history], arg.selectedCase.model_dump(), arg.options.provider_options())
-    except JudgeUnavailable as exc:
-        raise HTTPException(503, str(exc)) from exc
-
-
-
-@app.get("/cases")
-def cases(q: str = Query(default="", max_length=200), category: str = Query(default="", max_length=100), offset: int = Query(default=0, ge=0, le=10000), limit: int = Query(default=12, ge=1, le=50)):
-    return search_cases(q, category, offset, limit)
-
-
-
-@app.post("/cases/import")
-async def import_case(request: Request):
-    filename, data = await read_upload(request)
-    return await run_in_threadpool(extract_document, filename, data)

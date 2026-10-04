@@ -1,172 +1,37 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { useGameStore } from '../../store/gameStore';
-import { useJudge } from '../../hooks/useJudge';
-import ScorePanel from './ScorePanel';
-import JudgePanel from './JudgePanel';
-import CounselPanel from './CounselPanel';
-import TimerBar from './TimerBar';
-import TensionBar from './TensionBar';
-import TranscriptFeed from './TranscriptFeed';
-import TopBar from './TopBar';
-import ObjectionOverlay from './ObjectionOverlay';
-import './Courtroom.css';
+import { useEffect } from "react";
+import { CRITERIA, useGameStore } from "../../store/gameStore";
+import { useJudge } from "../../hooks/useJudge";
+import CounselPanel from "./CounselPanel";
+import JudgePanel from "./JudgePanel";
+import TranscriptFeed from "./TranscriptFeed";
+import "./Courtroom.css";
 
 export default function Courtroom() {
-  const {
-    error,
-    matchMode,
-    turnState, timer, timerActive, tickTimer, setTurn,
-    petitionerName, respondentName, selectedCase,
-    scores, roundNumber, maxRounds, nextRound, setObjection, clearObjection, objectionActive,
-    setJudgeMessage, clearJudge, addTranscript, isInterrupting, judgeInterruptContext
-  } = useGameStore();
-
-  const { processArgument, isProcessing, getOpeningStatement } = useJudge();
-  const timerRef = useRef(null);
-  const [hasOpened, setHasOpened] = useState(false);
-
-  // Opening statement from judge on mount
+  const state = useGameStore();
+  const { processArgument, isProcessing, cancelRequest } = useJudge();
+  const isBotTurn = state.matchMode === "1VBOT" && state.currentSpeaker !== state.humanSide;
   useEffect(() => {
-    if (!hasOpened) {
-      setHasOpened(true);
-      const opening = getOpeningStatement();
-      setJudgeMessage(opening);
-      addTranscript({ type: 'judge', text: opening });
-      setTimeout(() => {
-        clearJudge();
-        setTurn('PETITIONER');
-      }, 4000);
-    }
-  }, []);
-
-  // Timer countdown
-  useEffect(() => {
-    if (timerActive) {
-      timerRef.current = setInterval(() => {
-        tickTimer();
-      }, 1000);
-    }
-    return () => clearInterval(timerRef.current);
-  }, [timerActive, tickTimer]);
-
-  // Timer expiry
-  useEffect(() => {
-    if (timer === 0 && timerActive) {
-      if (turnState === 'PETITIONER' || turnState === 'RESPONDENT') {
-        setJudgeMessage("Time's up, Counsel. Your time has expired.", true);
-        addTranscript({ type: 'judge', text: "Time's up, Counsel. Your time has expired." });
-        setTimeout(() => {
-          clearJudge();
-          nextRound();
-        }, 2500);
-      }
-    }
-  }, [timer]);
-
-  // Timer pressure at 10s
-  useEffect(() => {
-    if (timer === 10 && timerActive && (turnState === 'PETITIONER' || turnState === 'RESPONDENT')) {
-      setJudgeMessage("Counsel, you have 10 seconds remaining.", true);
-      setTimeout(() => clearJudge(), 2000);
-    }
-  }, [timer]);
-
-  const handleSubmit = useCallback(async (text, side) => {
-    if (isProcessing) return;
-    await processArgument(text, side);
-  }, [processArgument, isProcessing]);
-
-  const handleObjection = (side) => {
-    setObjection(side);
-    addTranscript({ type: 'objection', text: `OBJECTION! raised by ${side === 'petitioner' ? petitionerName : respondentName}`, side });
-    setTimeout(() => {
-      clearObjection();
-      setJudgeMessage("Objection noted. Counsel, respond to the objection.", false);
-      addTranscript({ type: 'judge', text: 'Objection noted. Counsel, respond to the objection.' });
-      setTimeout(() => clearJudge(), 3000);
-    }, 2000);
-  };
-
-  const isJudgeTurn = turnState === 'JUDGE';
-  const isPetitionerTurn = turnState === 'PETITIONER';
-  const isRespondentTurn = turnState === 'RESPONDENT';
-
+    if (!isBotTurn || state.pendingRuling || state.error || isProcessing) return;
+    const timer = setTimeout(() => processArgument("", state.currentSpeaker, true), 250);
+    return () => clearTimeout(timer);
+  }, [isBotTurn, state.pendingRuling, state.error, state.currentSpeaker, isProcessing, processArgument]);
+  const names = { petitioner: state.petitionerName, respondent: state.respondentName };
+  const pending = state.pendingRuling;
+  const followup = pending?.interrupt && state.retryCountBySpeaker[pending.side] < 2;
+  const continueLabel = followup ? "Answer the bench" : pending?.side === "respondent" ? state.roundNumber === 3 ? "See the scorecard" : "Begin next round" : "Hear the respondent";
   return (
-    <div className="courtroom-bg">
-      {error && <p role="alert">{error} No points were added or lost.</p>}
-      {/* Ambient particles */}
-      <div className="courtroom-particles" />
-
-      {/* Top bar */}
-      <TopBar
-        roundNumber={roundNumber}
-        maxRounds={maxRounds}
-        caseName={selectedCase?.title}
-        caseCategory={selectedCase?.category}
-        matchMode={matchMode}
-      />
-
-      {/* Timer */}
-      <TimerBar
-        timer={timer}
-        isActive={timerActive && !isJudgeTurn}
-        turnState={turnState}
-        isInterrupting={isInterrupting}
-        interruptContext={judgeInterruptContext}
-      />
-
-      {/* Tension Bar */}
-      <div style={{ padding: '0 24px' }}>
-        <TensionBar />
-      </div>
-
-      {/* Objection overlay */}
-      {objectionActive && <ObjectionOverlay side={objectionActive} name={objectionActive === 'petitioner' ? petitionerName : respondentName} />}
-
-      {/* Main arena */}
-      <div className="courtroom-arena">
-        {/* Petitioner */}
-        <CounselPanel
-          side="petitioner"
-          name={petitionerName}
-          isActive={isPetitionerTurn}
-          isDisabled={!isPetitionerTurn || isProcessing}
-          isBotControlled={false}
-          scores={scores.petitioner}
-          onSubmit={(text) => handleSubmit(text, 'petitioner')}
-          onObjection={() => handleObjection('petitioner')}
-          canObjection={isRespondentTurn}
-        />
-
-        {/* Judge */}
-        <JudgePanel />
-
-        {/* Respondent */}
-        <CounselPanel
-          side="respondent"
-          name={matchMode === '1VBOT' ? `${respondentName} (BOT)` : respondentName}
-          isActive={isRespondentTurn}
-          isDisabled={!isRespondentTurn || isProcessing}
-          isBotControlled={matchMode === '1VBOT'}
-          scores={scores.respondent}
-          onSubmit={(text) => handleSubmit(text, 'respondent')}
-          onObjection={() => handleObjection('respondent')}
-          canObjection={isPetitionerTurn}
-        />
-      </div>
-
-      {/* Score bars */}
-      <ScorePanel
-        petitioner={{ name: petitionerName, ...scores.petitioner }}
-        respondent={{ name: respondentName, ...scores.respondent }}
-      />
-
-      {/* Transcript */}
+    <main className="courtroom-bg">
+      <header><h1>{state.selectedCase.title}</h1><p>Round {state.roundNumber} / 3</p></header>
+      <JudgePanel />
+      {isProcessing && <button onClick={cancelRequest}>Withdraw request</button>}
+      {state.error && <div role="alert"><p>{state.error}</p><p>No points were added or lost.</p>{isBotTurn && <button disabled={isProcessing} onClick={() => processArgument("", state.currentSpeaker, true)}>Retry opposing counsel</button>}</div>}
+      {pending ? <section>
+        {pending.botArgument && <details><summary>Read opposing counsel’s submission</summary><p>{pending.botArgument}</p></details>}
+        <button className="continue-button" onClick={state.acknowledgeRuling}>{continueLabel}</button>
+      </section> : <CounselPanel side={state.currentSpeaker} name={names[state.currentSpeaker]} isActive isDisabled={isProcessing} isBotControlled={isBotTurn} onSubmit={(text) => processArgument(text, state.currentSpeaker)} />}
+      <aside>{["petitioner", "respondent"].map((side) => <section key={side}><h2>{names[side]} · {state.scores[side].total ?? "—"}/100</h2>{Object.entries(CRITERIA).map(([key, label]) => <p key={key}>{label}: {state.scores[side][key]?.toFixed(1) ?? "Not assessed"}</p>)}</section>)}</aside>
       <TranscriptFeed />
-
-      {/* Courtroom pillars (decorative) */}
-      <div className="pillar pillar-left" />
-      <div className="pillar pillar-right" />
-    </div>
+      <button onClick={state.resetGame}>Leave hearing</button>
+    </main>
   );
 }

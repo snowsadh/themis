@@ -1,382 +1,385 @@
-import { useMemo, useState } from 'react';
-import { useGameStore } from '../../store/gameStore';
-import { motion, useMotionValue, useTransform } from 'framer-motion';
-import { CASES } from '../../data/cases';
-import './Lobby.css';
-
-function TiltCard({ children, className }) {
-  const x = useMotionValue(200);
-  const y = useMotionValue(200);
-  const rotateX = useTransform(y, [0, 400], [10, -10]);
-  const rotateY = useTransform(x, [0, 400], [-10, 10]);
-
-  function handleMouse(e) {
-    const rect = e.currentTarget.getBoundingClientRect();
-    x.set(e.clientX - rect.left);
-    y.set(e.clientY - rect.top);
-  }
-
-  return (
-    <motion.div
-      className={className}
-      onMouseMove={handleMouse}
-      onMouseLeave={() => { x.set(200); y.set(200); }}
-      style={{ rotateX, rotateY, transformPerspective: 1000 }}
-    >
-      {children}
-    </motion.div>
-  );
-}
+import { useEffect, useRef, useState } from "react";
+import { CASES } from "../../data/cases";
+import { api } from "../../utils/api";
+import CourtStage from "../CourtStage";
+import CaseSetup from "../CaseSetup";
+import BringCase from "../BringCase";
+import GameDialog from "../GameDialog";
+import ConnectionSettings from "../ConnectionSettings";
+import "./Lobby.css";
 
 export default function Lobby() {
-  const { 
-    setPetitionerName, setRespondentName, setSelectedCase, startGame, setMatchMode, setSessionProfile,
-    petitionerName, respondentName, selectedCase, matchMode,
-    theme, toggleTheme
-  } = useGameStore();
-  const [step, setStep] = useState(0); // 0=welcome, 1=mode, 2=case-select, 3=auth/names
-  const [localCase, setLocalCase] = useState(null);
-  const [displayName, setDisplayName] = useState('');
-  const [email, setEmail] = useState('');
-  const [roomCode, setRoomCode] = useState('');
-
-  const modeCards = useMemo(() => ([
-    {
-      id: '1V1',
-      title: '1V1',
-      subtitle: 'Current local mode',
-      description: 'Two counsel share the courtroom on the same device. This is the current default flow.',
-    },
-    {
-      id: '1VBOT',
-      title: '1VBot',
-      subtitle: 'Play against AI counsel',
-      description: 'You argue one side, and the opposing counsel is auto-generated from the case record.',
-    },
-    {
-      id: 'ONLINE',
-      title: 'Online Custom Room',
-      subtitle: 'Host or join with friends',
-      description: 'Create a private room, sign in, or continue as a guest to set up a shared match.',
-    },
-  ]), []);
-
-  const selectedModeCard = modeCards.find((card) => card.id === matchMode);
-
-  const handleModeSelect = (mode) => {
-    setMatchMode(mode);
-  };
-
-  const handleContinueAsGuest = () => {
-    if (!localCase) return;
-    const guestName = displayName.trim() || 'Guest Counsel';
-    setSessionProfile({
-      accessMode: 'guest',
-      displayName: guestName,
-      email: '',
-      roomCode: roomCode.trim().toUpperCase(),
-    });
-    setPetitionerName(guestName);
-    setRespondentName('Room Opponent');
-    setSelectedCase(localCase);
-    startGame({
-      matchMode,
-      selectedCase: localCase,
-      petitionerName: guestName,
-      respondentName: 'Room Opponent',
-    });
-  };
-
-  const handleLoginContinue = () => {
-    if (!localCase) return;
-    const signedInName = displayName.trim() || 'Host Counsel';
-    setSessionProfile({
-      accessMode: 'signed-in',
-      displayName: signedInName,
-      email: email.trim(),
-      roomCode: roomCode.trim().toUpperCase(),
-    });
-    setPetitionerName(signedInName);
-    setRespondentName('Room Opponent');
-    setSelectedCase(localCase);
-    startGame({
-      matchMode,
-      selectedCase: localCase,
-      petitionerName: signedInName,
-      respondentName: 'Room Opponent',
-    });
-  };
-
-  const handleNext = () => {
-    setStep(2);
-  };
-
-  const handleProceedFromCase = () => {
-    if (!localCase) return;
-    setSelectedCase(localCase);
-    setStep(3);
-  };
-
-  const handleStart = () => {
-    if (!localCase) return;
-    setSelectedCase(localCase);
-    if (matchMode === '1VBOT') {
-      startGame({
-        matchMode,
-        selectedCase: localCase,
-        petitionerName: petitionerName.trim() || 'Petitioner Counsel',
-        respondentName: 'AI Opponent',
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [data, setData] = useState({ items: [], total: 0, categories: [] });
+  const [loading, setLoading] = useState(true);
+  const [offline, setOffline] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [settings, setSettings] = useState(false);
+  const [help, setHelp] = useState(false);
+  const [reload, setReload] = useState(0);
+  const searchRef = useRef(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      setLoading(true);
+      api(
+        `/cases?q=${encodeURIComponent(query)}&category=${encodeURIComponent(category)}&offset=${offset}&limit=9`,
+        undefined,
+        controller.signal,
+      )
+        .then((result) => {
+          setData(result);
+          setOffline(false);
+        })
+        .catch(() => {
+          if (controller.signal.aborted) return;
+          const items = CASES.filter((item) =>
+            `${item.title} ${item.subtitle} ${item.facts}`
+              .toLowerCase()
+              .includes(query.toLowerCase()),
+          ).map((item) => ({
+            ...item,
+            source_label: "Fictional quick drill",
+            brief_note:
+              "A fictional warm-up proposition from the original practice set.",
+          }));
+          setData({ items, total: items.length, categories: [] });
+          setOffline(true);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLoading(false);
+        });
+    }, 180);
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [query, category, offset, reload]);
+  const browse = () => {
+    document
+      .getElementById("case-library")
+      ?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "instant"
+          : "smooth",
       });
-      return;
-    }
-
-    if (matchMode === 'ONLINE') {
-      startGame({
-        matchMode,
-        selectedCase: localCase,
-        petitionerName: petitionerName.trim() || 'Host Counsel',
-        respondentName: respondentName.trim() || 'Guest Counsel',
-      });
-      return;
-    }
-
-    startGame({
-      matchMode,
-      selectedCase: localCase,
-      petitionerName: petitionerName.trim() || 'Counsel A',
-      respondentName: respondentName.trim() || 'Counsel B',
-    });
+    searchRef.current?.focus({ preventScroll: true });
   };
-
   return (
-    <div className="lobby-bg">
-      <div className="lobby-stars" />
-      <div className="lobby-orb" />
-      <div className="lobby-overlay" />
-
-      {/* Header */}
-      <header className="lobby-header">
-        <div className="lobby-logo">
-          <span className="logo-icon">⚖️</span>
-          <span className="logo-text">THEMIS.AI</span>
-        </div>
-        <div>
-          <h1 className="lobby-title">Moot Court</h1>
-          <p className="lobby-subtitle">Hon'ble Supreme Court of India — Simulator</p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div className="lobby-mode-pill">{selectedModeCard?.title || '1V1'}</div>
-          <button className="theme-toggle-btn" onClick={toggleTheme} title="Toggle Theme">
-            {theme === 'dark' ? '☀️' : '🌙'}
+    <div className="game-home">
+      <header className="game-header">
+        <a className="game-logo" href="/" aria-label="Themis home">
+          <span className="logo-mark">T</span>THEMIS
+          <span className="logo-subtitle">MOOT COURT</span>
+        </a>
+        <nav aria-label="Main navigation">
+          <button className="nav-active" onClick={browse}>
+            Case files
           </button>
-        </div>
+          <button onClick={() => setHelp(true)}>How to play</button>
+          <button
+            className="icon-button"
+            aria-label="Open settings"
+            onClick={() => setSettings(true)}
+          >
+            ⚙
+          </button>
+        </nav>
       </header>
-
-      <main className="lobby-main" style={{ paddingBottom: '60px' }}>
-        {step === 0 && (
-          <TiltCard className="lobby-card glow-border fade-in">
-            <div className="lobby-emblem">🏛️</div>
-            <h2 className="lobby-card-title">IN THE SUPREME COURT OF INDIA</h2>
-            <p className="lobby-card-subtitle">Constitutional & Civil Appellate Jurisdiction</p>
-            <div className="lobby-divider" />
-            
-            <p className="lobby-desc">
-              Step into the highest court of the land. Our advanced AI Hon'ble Bench will evaluate your
-              arguments, logical structuring, and application of constitutional precedents in real-time.
+      <main className="home-main">
+        <section className="game-welcome">
+          <div className="welcome-stage">
+            <CourtStage compact>
+              <div className="stage-title">
+                <span>TAKE YOUR PLACE AT THE BENCH</span>
+                <h1>
+                  All rise.
+                  <br />
+                  <em>You’re up.</em>
+                </h1>
+              </div>
+              <div className="preview-dialogue">
+                <span className="dialogue-name">THE BENCH</span>
+                <p>Well, counsel. Shall we hear your case?</p>
+                <span aria-hidden="true">▼</span>
+              </div>
+            </CourtStage>
+          </div>
+          <div className="play-menu">
+            <span className="small-caps">THE COURT IS OPEN</span>
+            <h2>
+              A battle of
+              <br />
+              <span>better arguments.</span>
+            </h2>
+            <p>
+              Pick a side. Read the room.
+              <br />
+              Give the bench something to think about.
             </p>
-            
-            <div className="lobby-features">
-              <span className="feature-pill">1v1 local</span>
-              <span className="feature-pill">1vBot</span>
-              <span className="feature-pill">Online custom room</span>
-            </div>
-
-            <button className="btn-primary" onClick={() => setStep(1)}>
-              ENTER APPEARANCE ➔
+            <button className="primary-button big-play" onClick={browse}>
+              <span>Choose a case</span>
+              <span aria-hidden="true">▶</span>
             </button>
-          </TiltCard>
-        )}
-
-        {step === 1 && (
-          <TiltCard className="lobby-card wide-card glow-border fade-in">
-            <h2 className="lobby-card-title">Select Match Mode</h2>
-            <p className="lobby-card-subtitle">Choose how you want to enter the courtroom</p>
-            <div className="lobby-divider" />
-            <div className="mode-grid">
-              {modeCards.map((card) => (
+            <button
+              className="import-button"
+              onClick={() => setImporting(true)}
+            >
+              <span className="mini-folder" aria-hidden="true">
+                ▤
+              </span>
+              <span>
+                <strong>Bring your own case</strong>
+                <small>Your moot proposition. Ready to play.</small>
+              </span>
+              <span aria-hidden="true">↗</span>
+            </button>
+            <div className="play-menu-bottom">
+              <span>
+                <i className="status-dot" /> SOLO OR LOCAL DUEL
+              </span>
+              <span>3 ROUNDS</span>
+            </div>
+          </div>
+        </section>
+        <section
+          className="case-library"
+          id="case-library"
+          aria-labelledby="library-title"
+        >
+          <div className="library-title-row">
+            <div>
+              <span className="small-caps">FROM THE RECORD ROOM</span>
+              <h2 id="library-title">
+                Choose your next case
+                <span className="count-bubble">
+                  {loading ? "…" : data.total}
+                </span>
+              </h2>
+            </div>
+            <button className="quiet-button" onClick={() => setImporting(true)}>
+              + Your case file
+            </button>
+          </div>
+          <div className="library-tools">
+            <label className="library-search">
+              <span aria-hidden="true">⌕</span>
+              <input
+                ref={searchRef}
+                aria-label="Search cases"
+                placeholder="Search a case, right, article or legal issue…"
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setOffset(0);
+                }}
+                maxLength={200}
+              />
+              {query && (
                 <button
-                  key={card.id}
-                  className={`mode-card ${matchMode === card.id ? 'mode-card-selected' : ''}`}
-                  onClick={() => handleModeSelect(card.id)}
-                  type="button"
+                  className="icon-button"
+                  aria-label="Clear search"
+                  onClick={() => {
+                    setQuery("");
+                    setOffset(0);
+                  }}
                 >
-                  <div className="mode-card-top">
-                    <span className="mode-card-code">{card.title}</span>
-                    {matchMode === card.id && <span className="mode-card-badge">Selected</span>}
-                  </div>
-                  <div className="mode-card-subtitle">{card.subtitle}</div>
-                  <div className="mode-card-desc">{card.description}</div>
+                  ×
                 </button>
-              ))}
-            </div>
-            <div className="lobby-actions">
-              <button className="btn-secondary" onClick={() => setStep(0)}>BACK</button>
-              <button className="btn-primary" onClick={handleNext} disabled={!matchMode}>
-                CONTINUE ➔
+              )}
+            </label>
+            <label className="category-filter">
+              <span className="sr-only">Filter by category</span>
+              <select
+                value={category}
+                onChange={(e) => {
+                  setCategory(e.target.value);
+                  setOffset(0);
+                }}
+              >
+                <option value="">All subjects</option>
+                {data.categories.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {offline && (
+            <div className="library-notice" role="status">
+              The record room is offline. These quick drills are available while
+              you reconnect.{" "}
+              <button
+                onClick={() => {
+                  setCategory("");
+                  setOffset(0);
+                  setReload((r) => r + 1);
+                }}
+              >
+                Retry library
               </button>
             </div>
-          </TiltCard>
-        )}
-
-        {step === 2 && (
-          <TiltCard className="lobby-card wide-card glow-border fade-in">
-            <h2 className="lobby-card-title">Select Case</h2>
-            <p className="lobby-card-subtitle">Choose a moot court problem to argue</p>
-            <div className="lobby-divider" />
-            <div className="cases-grid">
-              {CASES.map(c => (
-                <div
-                  key={c.id}
-                  className={`case-card ${localCase?.id === c.id ? 'case-selected' : ''}`}
-                  onClick={() => setLocalCase(c)}
+          )}
+          <div
+            className={`case-shelf ${loading ? "shelf-loading" : ""}`}
+            aria-busy={loading}
+          >
+            {loading
+              ? Array.from({ length: 6 }, (_, i) => (
+                  <div className="case-skeleton" key={i} aria-hidden="true" />
+                ))
+              : data.items.map((item, i) => (
+                  <button
+                    className={`game-case-card case-color-${i % 3}`}
+                    key={item.id}
+                    onClick={() => setSelected(item)}
+                  >
+                    <div className="folder-tab">{item.year || "CASE FILE"}</div>
+                    <div className="case-card-paper">
+                      <div className="case-card-meta">
+                        <span>{item.category}</span>
+                        <span aria-hidden="true">↗</span>
+                      </div>
+                      <h3>{item.title}</h3>
+                      <p>{item.issues?.[0] || item.subtitle}</p>
+                      <div className="case-card-bottom">
+                        <span>{item.source_label || "Court archive"}</span>
+                        <span>OPEN FILE →</span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+          </div>
+          {!loading && data.total === 0 && (
+            <div className="empty-library">
+              <span aria-hidden="true">▤</span>
+              <h3>No matching files.</h3>
+              <p>
+                Try a case name, a right or an article number. Or bring your own
+                proposition.
+              </p>
+              <button
+                className="quiet-button"
+                onClick={() => {
+                  setQuery("");
+                  setCategory("");
+                  setOffset(0);
+                }}
+              >
+                Clear filters
+              </button>
+              <a
+                href={`https://indiankanoon.org/search/?formInput=${encodeURIComponent(query)}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Search Indian Kanoon ↗
+              </a>
+            </div>
+          )}
+          {!loading && !offline && data.total > 9 && (
+            <div className="library-pagination">
+              <span>
+                {offset + 1}–{Math.min(offset + 9, data.total)} of {data.total}{" "}
+                matters
+              </span>
+              <div className="button-row">
+                <button
+                  className="quiet-button"
+                  disabled={offset === 0}
+                  onClick={() => setOffset((n) => Math.max(0, n - 9))}
                 >
-                  <div className="case-cat">{c.category}</div>
-                  <h3 className="case-title">{c.title}</h3>
-                  <p className="case-subtitle">{c.subtitle}</p>
-                  <div className="case-difficulty-row">
-                    <span className="case-difficulty">{c.difficulty}</span>
-                  </div>
-                  <div className="case-issues-count">{c.issues.length} Issues • {c.precedents.length} Precedents</div>
-                  {localCase?.id === c.id && (
-                    <div className="case-selected-badge">✓ Selected</div>
-                  )}
-                </div>
-              ))}
-            </div>
-            {localCase && (
-              <div className="case-preview fade-in">
-                <h4>Case Brief</h4>
-                <p className="case-brief-difficulty">Difficulty: {localCase.difficulty}</p>
-                <p>{localCase.brief}</p>
-                <p>{localCase.facts.substring(0, 200)}...</p>
-              </div>
-            )}
-            <div className="lobby-actions">
-              <button className="btn-secondary" onClick={() => setStep(1)}>BACK</button>
-              <button className="btn-primary" onClick={handleProceedFromCase} disabled={!localCase}>
-                {matchMode === 'ONLINE' ? 'PROCEED TO LOGIN ➔' : 'PROCEED TO COUNSEL ➔'}
-              </button>
-            </div>
-          </TiltCard>
-        )}
-
-        {step === 3 && matchMode !== 'ONLINE' && (
-          <TiltCard className="lobby-card glow-border fade-in">
-            <h2 className="lobby-card-title">Identify Counsel</h2>
-            <p className="lobby-card-subtitle">
-              {matchMode === '1VBOT' ? 'Set your name before facing the AI opponent' : 'Enter the names for both sides'}
-            </p>
-            <div className="lobby-divider" />
-            <div className="names-grid">
-              <div className="name-field petitioner-field">
-                <label>⚖️ Petitioner / Appellant</label>
-                <input
-                  className="name-input"
-                  value={petitionerName}
-                  onChange={e => setPetitionerName(e.target.value)}
-                  placeholder="Counsel for Petitioner"
-                  maxLength={30}
-                />
-                <span className="field-tag petitioner-tag">BLUE SIDE</span>
-              </div>
-              <div className="vs-divider">VS</div>
-              <div className="name-field respondent-field">
-                <label>⚖️ Respondent / Appellee</label>
-                <input
-                  className="name-input"
-                  value={matchMode === '1VBOT' ? 'AI Opponent' : respondentName}
-                  onChange={e => setRespondentName(e.target.value)}
-                  placeholder="Counsel for Respondent"
-                  maxLength={30}
-                  disabled={matchMode === '1VBOT'}
-                />
-                <span className="field-tag respondent-tag">{matchMode === '1VBOT' ? 'AI SIDE' : 'RED SIDE'}</span>
-              </div>
-            </div>
-            <div className="lobby-actions">
-              <button className="btn-secondary" onClick={() => setStep(2)}>BACK</button>
-              <button className="btn-primary" onClick={handleStart} disabled={!petitionerName.trim() || (matchMode !== '1VBOT' && !respondentName.trim())}>
-                APPROACH THE BENCH ➔
-              </button>
-            </div>
-          </TiltCard>
-        )}
-
-        {step === 3 && matchMode === 'ONLINE' && (
-          <TiltCard className="lobby-card glow-border fade-in">
-            <h2 className="lobby-card-title">Online Room Login</h2>
-            <p className="lobby-card-subtitle">Sign in or continue as a guest to open a custom room</p>
-            <div className="lobby-divider" />
-
-            <div className="auth-form">
-              <label className="auth-field">
-                <span>Display Name</span>
-                <input
-                  className="name-input"
-                  value={displayName}
-                  onChange={(event) => setDisplayName(event.target.value)}
-                  placeholder="Your courtroom name"
-                  maxLength={30}
-                />
-              </label>
-              <label className="auth-field">
-                <span>Email</span>
-                <input
-                  className="name-input"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="name@example.com"
-                  type="email"
-                />
-              </label>
-              <label className="auth-field">
-                <span>Room Code</span>
-                <input
-                  className="name-input"
-                  value={roomCode}
-                  onChange={(event) => setRoomCode(event.target.value)}
-                  placeholder="JOIN-4821"
-                  maxLength={12}
-                />
-              </label>
-            </div>
-
-            <div className="auth-note">
-              Guest mode keeps the room flow lightweight. Login can be wired to a real backend later.
-            </div>
-
-            <div className="lobby-actions">
-              <button className="btn-secondary" onClick={() => setStep(2)}>BACK</button>
-              <div className="btn-row">
-                <button className="btn-secondary" onClick={handleContinueAsGuest}>CONTINUE AS GUEST</button>
-                <button className="btn-primary" onClick={handleLoginContinue} disabled={!displayName.trim() || !roomCode.trim()}>
-                  LOGIN ➔
+                  ← Previous
+                </button>
+                <button
+                  className="quiet-button"
+                  disabled={offset + 9 >= data.total}
+                  onClick={() => setOffset((n) => n + 9)}
+                >
+                  Next files →
                 </button>
               </div>
             </div>
-          </TiltCard>
-        )}
+          )}
+        </section>
       </main>
-
-      <div className="lobby-ticker">
-        <div className="ticker-content">
-          {[
-            "🏛️ SUPREME COURT CAUSE LIST • REHEARING ON ARTICLE 21 SCHEDULED • CONTEMPT MOTIONS FILED BY COUNSEL • AI HON'BLE BENCH PRESIDING TODAY • PENDING CASES: 4,021 • COURT IS IN SESSION"
-          ].map((item, i) => (
-            <span key={i} className="ticker-item">{item}</span>
-          ))}
-        </div>
-      </div>
+      {selected && (
+        <CaseSetup selectedCase={selected} onClose={() => setSelected(null)} />
+      )}
+      {importing && (
+        <BringCase
+          onClose={() => setImporting(false)}
+          onReady={(item) => {
+            setImporting(false);
+            setSelected(item);
+          }}
+        />
+      )}
+      {settings && (
+        <GameDialog title="Settings" onClose={() => setSettings(false)}>
+          <h2>Behind the bench</h2>
+          <ConnectionSettings expanded />
+        </GameDialog>
+      )}
+      {help && (
+        <GameDialog title="How to play" onClose={() => setHelp(false)}>
+          <div className="how-to">
+            <h2>
+              Think fast.
+              <br />
+              Take your time.
+            </h2>
+            <ol>
+              <li>
+                <strong>Pick the fight.</strong>
+                <p>
+                  Open an archive case or bring a moot proposition. Read the
+                  facts, issues and positions before choosing a side.
+                </p>
+              </li>
+              <li>
+                <strong>Make your opening.</strong>
+                <p>
+                  Play solo against computer counsel or share a device with a
+                  friend. The petitioner always opens.
+                </p>
+              </li>
+              <li>
+                <strong>Face the bench.</strong>
+                <p>
+                  Submit an argument. Read the ruling and answer any question.
+                  Continue when you’re ready—there’s no countdown.
+                </p>
+              </li>
+              <li>
+                <strong>Finish the hearing.</strong>
+                <p>
+                  Three rounds: opening, rebuttal and closing. Your scorecard
+                  and court record are yours to download.
+                </p>
+              </li>
+            </ol>
+            <p className="form-note">
+              Courtroom practice, not a real ruling. Archive briefs may include
+              the historical outcome; argue the supplied issue, not a memorised
+              winner. Session work clears when this tab reloads.
+            </p>
+            <button
+              className="primary-button"
+              onClick={() => {
+                setHelp(false);
+                browse();
+              }}
+            >
+              Got it. Find a case →
+            </button>
+          </div>
+        </GameDialog>
+      )}
     </div>
   );
 }

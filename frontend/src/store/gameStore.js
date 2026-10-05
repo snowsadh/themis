@@ -48,13 +48,6 @@ const session = () => ({
 
 export const useGameStore = create((set, get) => ({
   ...session(),
-  setPhase: (phase) => set({ phase }),
-  setMatchMode: (matchMode) => set({ matchMode }),
-  setSelectedCase: (selectedCase) => set({ selectedCase }),
-  setPetitionerName: (petitionerName) => set({ petitionerName }),
-  setRespondentName: (respondentName) => set({ respondentName }),
-  sessionProfile: {},
-  setSessionProfile: (profile) => set((state) => ({ sessionProfile: { ...state.sessionProfile, ...profile } })),
   matchMode: "1V1",
   humanSide: "petitioner",
   petitionerName: "Counsel A",

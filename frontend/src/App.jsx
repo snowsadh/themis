@@ -1,61 +1,37 @@
-import { useEffect } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
-import { useGameStore, GAME_PHASES } from './store/gameStore';
-import Lobby from './components/Lobby/Lobby';
-import Courtroom from './components/Courtroom/Courtroom';
-import Verdict from './components/Verdict/Verdict';
-import Spotlight from './components/Spotlight';
+import { useEffect } from "react";
+import { AnimatePresence, motion as Motion, MotionConfig } from "framer-motion";
+import { useGameStore, GAME_PHASES } from "./store/gameStore";
+import Lobby from "./components/Lobby/Lobby";
+import Courtroom from "./components/Courtroom/Courtroom";
+import Verdict from "./components/Verdict/Verdict";
 
-function App() {
-  const { phase, theme, toggleTheme } = useGameStore();
-
+export default function App() {
+  const { phase, theme } = useGameStore();
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
+    document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
-
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [phase]);
   return (
-    <>
-      <Spotlight />
+    <MotionConfig reducedMotion="user">
       <AnimatePresence mode="wait">
-        {(phase === GAME_PHASES.LOBBY || phase === GAME_PHASES.CASE_SELECT) && (
-          <motion.div 
-            key="lobby" 
-            initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }} 
-            animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }} 
-            exit={{ opacity: 0, scale: 1.03, filter: 'blur(10px)' }} 
-            transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }} 
-            style={{ width: '100%', height: '100%' }}
-          >
-            <Lobby />
-          </motion.div>
-        )}
-        {phase === GAME_PHASES.COURTROOM && (
-          <motion.div 
-            key="courtroom" 
-            initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }} 
-            animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }} 
-            exit={{ opacity: 0, scale: 1.03, filter: 'blur(10px)' }} 
-            transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }} 
-            style={{ width: '100%', height: '100%' }}
-          >
+        <Motion.div
+          key={phase}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.18 }}
+        >
+          {phase === GAME_PHASES.COURTROOM ? (
             <Courtroom />
-          </motion.div>
-        )}
-        {phase === GAME_PHASES.VERDICT && (
-          <motion.div 
-            key="verdict" 
-            initial={{ opacity: 0, scale: 0.97, filter: 'blur(10px)' }} 
-            animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }} 
-            exit={{ opacity: 0, scale: 1.03, filter: 'blur(10px)' }} 
-            transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }} 
-            style={{ width: '100%', height: '100%' }}
-          >
+          ) : phase === GAME_PHASES.VERDICT ? (
             <Verdict />
-          </motion.div>
-        )}
+          ) : (
+            <Lobby />
+          )}
+        </Motion.div>
       </AnimatePresence>
-    </>
+    </MotionConfig>
   );
 }
-
-export default App;
